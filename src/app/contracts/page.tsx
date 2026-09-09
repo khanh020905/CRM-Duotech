@@ -13,6 +13,7 @@ import { ContractsTable } from '@/components/contracts/ContractsTable';
 import { ContractForm } from '@/components/contracts/ContractForm';
 import { ContractDetailSheet } from '@/components/contracts/ContractDetailSheet';
 import { ContractImportWizard } from '@/components/contracts/ContractImportWizard';
+import { ExtendContractModal } from '@/components/contracts/ExtendContractModal';
 import { Upload, Download, Plus, Trash2, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -21,6 +22,7 @@ export default function ContractsPage() {
     contracts,
     customers,
     members,
+    settings,
     addContract,
     updateContract,
     deleteContract,
@@ -49,6 +51,7 @@ export default function ContractsPage() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [contractToDelete, setContractToDelete] = useState<Contract | null>(null);
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [extendingContract, setExtendingContract] = useState<Contract | null>(null);
 
   // 1. Filtered Contracts across all data
   const filteredContracts = useMemo(() => {
@@ -252,6 +255,17 @@ export default function ContractsPage() {
     setDeleteConfirmInput('');
   };
 
+  // Handle Extend Contract (update maintenance in-place)
+  const handleExtendConfirm = (contractId: string, updates: Partial<Contract>) => {
+    updateContract(contractId, updates);
+    // Refresh the viewing contract if it's the same one
+    if (viewingContract?.id === contractId) {
+      setViewingContract((prev) => (prev ? { ...prev, ...updates } : null));
+    }
+    setExtendingContract(null);
+    showToast('Gia hạn thành công', 'Dịch vụ Maintain đã được cập nhật vào hợp đồng có sẵn', 'success');
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6 pb-12">
@@ -383,6 +397,7 @@ export default function ContractsPage() {
             setEditingContract(c);
             setIsFormOpen(true);
           }}
+          onExtend={(c) => setExtendingContract(c)}
           onArchive={(id) => {
             archiveContract(id);
             if (viewingContract?.id === id) {
@@ -399,6 +414,17 @@ export default function ContractsPage() {
           members={members}
           customer={customers.find((cust) => cust.id === viewingContract?.customerId)}
         />
+
+        {/* Extend Contract Modal */}
+        {extendingContract && (
+          <ExtendContractModal
+            isOpen={true}
+            onClose={() => setExtendingContract(null)}
+            contract={extendingContract}
+            onConfirm={handleExtendConfirm}
+            authorName={settings.profile?.name || settings.currentUser?.name || 'Hệ thống'}
+          />
+        )}
 
         {/* 5-Step Excel/CSV Import Wizard */}
         <ContractImportWizard

@@ -21,6 +21,7 @@ import {
   AlertCircle,
   History,
   CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ContractDetailSheetProps {
@@ -28,6 +29,7 @@ interface ContractDetailSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onEdit: (contract: Contract) => void;
+  onExtend: (contract: Contract) => void;
   onArchive: (id: string) => void;
   onDelete: (contract: Contract) => void;
   onUpdateAttachments: (id: string, attachments: Contract['attachments']) => void;
@@ -40,6 +42,7 @@ export function ContractDetailSheet({
   isOpen,
   onClose,
   onEdit,
+  onExtend,
   onArchive,
   onDelete,
   onUpdateAttachments,
@@ -100,6 +103,19 @@ export function ContractDetailSheet({
 
             {/* Quick Actions */}
             <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onClose();
+                  onExtend(contract);
+                }}
+                className="flex items-center gap-1 text-xs text-[#1765FF] border-[#B2CCFF] hover:bg-[#EFF6FF]"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Gia hạn</span>
+              </Button>
+
               <Button
                 variant="outline"
                 size="sm"
