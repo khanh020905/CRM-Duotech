@@ -122,6 +122,8 @@ export interface ContractAttachment {
   type: string;
   uploadDate: string;
   blobKey?: string;
+  dataUrl?: string;
+  url?: string;
 }
 
 export interface Contract {

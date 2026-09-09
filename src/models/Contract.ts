@@ -20,6 +20,8 @@ const AttachmentSchema = new Schema(
     type: { type: String, required: true },
     uploadDate: { type: String, required: true },
     blobKey: { type: String },
+    dataUrl: { type: String },
+    url: { type: String },
   },
   { _id: false }
 );

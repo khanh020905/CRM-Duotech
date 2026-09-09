@@ -6,7 +6,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { MaintenanceForm, MaintenanceFormData } from './MaintenanceForm';
 import { AttachmentManager } from './AttachmentManager';
-import { Plus, Building2, User, Phone, Calendar, DollarSign, FileCheck } from 'lucide-react';
+import { Plus, Building2, User, Phone, Calendar, DollarSign, FileCheck, Paperclip } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 
 interface ContractFormProps {
@@ -289,11 +289,18 @@ export function ContractForm({
           <button
             type="button"
             onClick={() => setActiveTab('attachments')}
-            className={`pb-2 text-xs sm:text-sm font-semibold transition-all relative ${
+            className={`pb-2 text-xs sm:text-sm font-semibold transition-all relative flex items-center gap-1.5 ${
               activeTab === 'attachments' ? 'text-[#1765FF]' : 'text-[#667085] hover:text-[#101828]'
             }`}
           >
-            3. Tệp đính kèm ({attachments.length})
+            <span>3. Tệp đính kèm</span>
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
+                attachments.length > 0 ? 'bg-[#1765FF] text-white' : 'bg-[#F2F4F7] text-[#667085]'
+              }`}
+            >
+              {attachments.length}
+            </span>
             {activeTab === 'attachments' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1765FF]" />
             )}
@@ -507,6 +514,64 @@ export function ContractForm({
                   className="w-full h-9 px-3 bg-white border border-[#D0D5DD] rounded-xl text-xs sm:text-sm text-[#101828] focus:outline-none focus:ring-2 focus:ring-[#1765FF]/20"
                 />
               </div>
+            </div>
+
+            {/* Row 6: Quick Attachment Access */}
+            <div className="pt-2 border-t border-[#F2F4F7]">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-[#344054]">
+                  Tệp đính kèm hợp đồng ({attachments.length})
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('attachments')}
+                  className="text-xs text-[#1765FF] hover:underline font-semibold flex items-center gap-1"
+                >
+                  <span>{attachments.length > 0 ? 'Quản lý tệp chi tiết' : '+ Thêm tệp đính kèm'}</span>
+                  <span>→</span>
+                </button>
+              </div>
+
+              {attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2 p-2.5 bg-[#F8FAFC] border border-[#E6EBF2] rounded-xl">
+                  {attachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-[#D0D5DD] rounded-lg text-xs text-[#101828] shadow-2xs"
+                    >
+                      <Paperclip className="w-3.5 h-3.5 text-[#1765FF] shrink-0" />
+                      <span className="truncate max-w-[140px] font-medium" title={att.name}>
+                        {att.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setAttachments(attachments.filter((a) => a.id !== att.id))}
+                        className="text-[#98A2B3] hover:text-[#DC2626] ml-1 font-bold"
+                        title="Xóa tệp"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('attachments')}
+                    className="px-2.5 py-1 text-xs text-[#1765FF] hover:bg-[#EFF6FF] rounded-lg transition-colors font-semibold"
+                  >
+                    + Thêm tệp khác
+                  </button>
+                </div>
+              ) : (
+                <div
+                  onClick={() => setActiveTab('attachments')}
+                  className="p-3 border border-dashed border-[#D0D5DD] hover:border-[#1765FF] hover:bg-[#EFF6FF]/40 rounded-xl text-center cursor-pointer transition-colors"
+                >
+                  <p className="text-xs text-[#667085]">
+                    Chưa có tệp đính kèm.{' '}
+                    <span className="font-semibold text-[#1765FF]">Nhấp vào đây</span> để tải lên file hợp đồng (PDF, Word, Excel, Ảnh...)
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

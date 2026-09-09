@@ -73,9 +73,10 @@ export function ContractImportWizard({
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [importResults, setImportResults] = useState<{ success: number; skipped: number } | null>(null);
 
+  const [isDragging, setIsDragging] = useState(false);
+
   // 1. Handle File Upload
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const uploadedFile = e.target.files?.[0];
+  const processFile = (uploadedFile?: File) => {
     if (!uploadedFile) return;
 
     setFile(uploadedFile);
@@ -83,19 +84,26 @@ export function ContractImportWizard({
 
     reader.onload = (evt) => {
       try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
+        const buffer = evt.target?.result as ArrayBuffer;
+        const data = new Uint8Array(buffer);
+        const wb = XLSX.read(data, { type: 'array', codepage: 65001 });
         setWorkbook(wb);
         setSheetNames(wb.SheetNames);
         const firstSheet = wb.SheetNames[0];
         setSelectedSheet(firstSheet);
         loadSheetData(wb, firstSheet);
       } catch (err) {
+        console.error('Lỗi đọc file Excel/CSV:', err);
         showToast('Lỗi đọc file', 'Không thể đọc file Excel hoặc CSV này. Vui lòng kiểm tra lại định dạng.', 'error');
       }
     };
 
-    reader.readAsBinaryString(uploadedFile);
+    reader.readAsArrayBuffer(uploadedFile);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFile = e.target.files?.[0];
+    processFile(uploadedFile);
   };
 
   const loadSheetData = (wb: XLSX.WorkBook, sName: string) => {
@@ -397,11 +405,28 @@ export function ContractImportWizard({
         {/* STEP 1: Upload File */}
         {step === 1 && (
           <div className="space-y-4 animate-fade-in">
-            <div className="border-2 border-dashed border-[#D0D5DD] hover:border-[#1765FF] hover:bg-[#F8FAFC] transition-all rounded-2xl p-8 text-center cursor-pointer">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const droppedFile = e.dataTransfer.files?.[0];
+                processFile(droppedFile);
+              }}
+              className={`border-2 border-dashed transition-all rounded-2xl p-8 text-center cursor-pointer ${
+                isDragging
+                  ? 'border-[#1765FF] bg-[#EFF6FF]'
+                  : 'border-[#D0D5DD] hover:border-[#1765FF] hover:bg-[#F8FAFC]'
+              }`}
+            >
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
-                onChange={handleFileUpload}
+                onChange={handleFileInputChange}
                 className="hidden"
                 id="excel-file-input"
               />
@@ -410,10 +435,10 @@ export function ContractImportWizard({
                   <FileSpreadsheet className="w-6 h-6" />
                 </div>
                 <span className="text-sm font-bold text-[#101828]">
-                  Nhấp để tải file hoặc kéo thả vào đây
+                  {file ? `Đã chọn: ${file.name}` : 'Nhấp để tải file hoặc kéo thả vào đây'}
                 </span>
                 <span className="text-xs text-[#667085] mt-1">
-                  Định dạng hỗ trợ: .xlsx, .xls, .csv (UTF-8)
+                  Định dạng hỗ trợ: .xlsx, .xls, .csv (UTF-8 tiếng Việt)
                 </span>
               </label>
             </div>
