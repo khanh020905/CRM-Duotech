@@ -1,10 +1,7 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI environment variable inside .env.local');
-}
+const DEFAULT_MONGODB_URI =
+  'mongodb+srv://duotechcompanyhr_db_user:BmfUnyu4uoEdxrME@cluster0.4odsraq.mongodb.net/duotech_crm?appName=Cluster0';
 
 interface MongooseCache {
   conn: typeof mongoose | null;
@@ -23,6 +20,8 @@ if (!global.mongooseCache) {
 }
 
 export async function connectToDatabase(): Promise<typeof mongoose> {
+  const uri = process.env.MONGODB_URI || DEFAULT_MONGODB_URI;
+
   if (cached.conn) {
     return cached.conn;
   }
@@ -32,7 +31,7 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
       bufferCommands: false,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI!, opts).then((mongooseInstance) => {
+    cached.promise = mongoose.connect(uri, opts).then((mongooseInstance) => {
       return mongooseInstance;
     });
   }
