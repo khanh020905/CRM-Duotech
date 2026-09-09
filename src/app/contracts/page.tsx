@@ -25,6 +25,7 @@ export default function ContractsPage() {
     updateContract,
     deleteContract,
     archiveContract,
+    addMember,
     showToast,
   } = useCRM();
 
@@ -370,6 +371,7 @@ export default function ContractsPage() {
           customers={customers}
           members={members}
           existingContracts={contracts}
+          onAddMember={addMember}
         />
 
         {/* Contract Detail Sheet (360 view) */}

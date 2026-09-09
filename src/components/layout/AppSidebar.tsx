@@ -13,6 +13,7 @@ import {
   BarChart2,
   Settings,
   ChevronRight,
+  UserCheck,
 } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { WorkspaceSelect } from './WorkspaceSelect';
@@ -64,6 +65,12 @@ export function AppSidebar({ className }: { className?: string }) {
       href: '/reports',
       label: 'Báo cáo',
       icon: BarChart2,
+      badge: null,
+    },
+    {
+      href: '/members',
+      label: 'Người phụ trách',
+      icon: UserCheck,
       badge: null,
     },
   ];

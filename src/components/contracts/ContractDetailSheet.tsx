@@ -70,12 +70,12 @@ export function ContractDetailSheet({
   const renewalAlert = getRenewalStatus(contract.maintenance?.nextRenewalDate);
 
   return (
-    <Sheet isOpen={isOpen} onClose={onClose} width="lg">
+    <Sheet isOpen={isOpen} onClose={onClose} width="xl">
       <div className="flex flex-col h-full bg-[#F6F8FC]">
         {/* Header */}
         <div className="bg-white px-6 py-5 border-b border-[#E6EBF2]">
           <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1 min-w-0">
+            <div className="space-y-1 min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-xs font-bold px-2.5 py-0.5 rounded-md bg-[#EFF6FF] text-[#1765FF] border border-[#B2CCFF]">
                   {contract.contractCode}
@@ -90,10 +90,10 @@ export function ContractDetailSheet({
                   </span>
                 )}
               </div>
-              <h2 className="text-lg font-bold text-[#101828] truncate mt-1">
+              <h2 className="text-lg font-bold text-[#101828] truncate mt-1" title={contract.project}>
                 {contract.project}
               </h2>
-              <p className="text-xs text-[#667085]">
+              <p className="text-xs text-[#667085] truncate" title={contract.customerName || customer?.company || 'Khách hàng'}>
                 Khách hàng: <strong>{contract.customerName || customer?.company || 'Khách hàng'}</strong>
               </p>
             </div>
@@ -169,39 +169,67 @@ export function ContractDetailSheet({
             return (
               <div className="space-y-4 animate-fade-in">
                 {/* Financial Box */}
-                <div className="bg-white p-5 rounded-2xl border border-[#E6EBF2] shadow-2xs space-y-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div>
+                <div className="bg-white p-5 rounded-2xl border border-[#E6EBF2] shadow-2xs space-y-4 overflow-hidden">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div className="p-3.5 bg-[#F8FAFC] border border-[#E6EBF2] rounded-xl min-w-0">
                       <span className="text-xs text-[#667085] block mb-1">Giá trị hợp đồng</span>
-                      <span className="text-base sm:text-lg font-bold text-[#101828]">
+                      <span
+                        className="text-base sm:text-lg font-bold text-[#101828] block truncate"
+                        title={formatCurrency(contract.value)}
+                      >
                         {formatCurrency(contract.value)}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-xs text-[#667085] block mb-1">Đã thu</span>
-                      <span className="text-base sm:text-lg font-bold text-[#059669]">
+
+                    <div className="p-3.5 bg-[#ECFDF5]/60 border border-[#A7F3D0] rounded-xl min-w-0">
+                      <span className="text-xs text-[#059669] block mb-1 font-medium">Đã thu</span>
+                      <span
+                        className="text-base sm:text-lg font-bold text-[#059669] block truncate"
+                        title={formatCurrency(paid)}
+                      >
                         {formatCurrency(paid)}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-xs text-[#667085] block mb-1">Còn lại</span>
-                      <span className={`text-base sm:text-lg font-bold ${remaining > 0 ? 'text-[#D97706]' : 'text-[#667085]'}`}>
+
+                    <div className="p-3.5 bg-[#FFFBEB]/60 border border-[#FDE68A] rounded-xl min-w-0">
+                      <span className="text-xs text-[#D97706] block mb-1 font-medium">Còn lại</span>
+                      <span
+                        className={`text-base sm:text-lg font-bold block truncate ${
+                          remaining > 0 ? 'text-[#D97706]' : 'text-[#667085]'
+                        }`}
+                        title={formatCurrency(remaining)}
+                      >
                         {formatCurrency(remaining)}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-xs text-[#667085] block mb-1">Phí maintain / tháng</span>
-                      <span className="text-base sm:text-lg font-bold text-[#1765FF]">
-                        {contract.maintenance?.monthlyFee > 0 ? formatCurrency(contract.maintenance.monthlyFee) : '—'}
+
+                    <div className="p-3.5 bg-[#EFF6FF]/60 border border-[#B2CCFF] rounded-xl min-w-0">
+                      <span className="text-xs text-[#1765FF] block mb-1 font-medium">Phí maintain / tháng</span>
+                      <span
+                        className="text-base sm:text-lg font-bold text-[#1765FF] block truncate"
+                        title={
+                          contract.maintenance?.monthlyFee > 0
+                            ? formatCurrency(contract.maintenance.monthlyFee)
+                            : '0 ₫'
+                        }
+                      >
+                        {contract.maintenance?.monthlyFee > 0
+                          ? formatCurrency(contract.maintenance.monthlyFee)
+                          : '—'}
                       </span>
                     </div>
                   </div>
 
                   {/* Payment Progress Bar */}
                   <div className="pt-2 border-t border-[#F2F4F7]">
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="text-[#667085]">Tiến độ thanh toán ({progress}%)</span>
-                      <span className="font-semibold text-[#101828]">{formatCurrency(paid)} / {formatCurrency(contract.value)}</span>
+                    <div className="flex items-center justify-between text-xs mb-1.5 flex-wrap gap-1 min-w-0">
+                      <span className="text-[#667085] shrink-0">Tiến độ thanh toán ({progress}%)</span>
+                      <span
+                        className="font-semibold text-[#101828] truncate max-w-full text-right"
+                        title={`${formatCurrency(paid)} / ${formatCurrency(contract.value)}`}
+                      >
+                        {formatCurrency(paid)} / {formatCurrency(contract.value)}
+                      </span>
                     </div>
                     <div className="w-full h-2 bg-[#F2F4F7] rounded-full overflow-hidden">
                       <div
@@ -302,9 +330,12 @@ export function ContractDetailSheet({
                     </span>
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-[#667085] block">Mức phí duy trì / tháng:</span>
-                    <span className="font-bold text-sm text-[#1765FF]">
+                    <span
+                      className="font-bold text-sm text-[#1765FF] block truncate"
+                      title={contract.maintenance?.monthlyFee > 0 ? formatCurrency(contract.maintenance.monthlyFee) : '0 đ'}
+                    >
                       {contract.maintenance?.monthlyFee > 0 ? formatCurrency(contract.maintenance.monthlyFee) : '0 đ'}
                     </span>
                   </div>

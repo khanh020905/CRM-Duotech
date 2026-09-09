@@ -27,6 +27,7 @@ function SettingsContent() {
     canDisableMember,
     toggleMemberStatus,
     reassignMemberWork,
+    deleteMember,
   } = useCRM();
 
   // Tab State
@@ -114,6 +115,7 @@ function SettingsContent() {
             canDisableMember={canDisableMember}
             onToggleStatus={toggleMemberStatus}
             onReassignWork={reassignMemberWork}
+            onDeleteMember={deleteMember}
           />
         )}
 

@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Edit2,
   CheckCircle2,
+  Trash2,
 } from 'lucide-react';
 
 interface MembersSettingsProps {
@@ -31,6 +32,7 @@ interface MembersSettingsProps {
   };
   onToggleStatus: (id: string) => boolean;
   onReassignWork: (fromMemberId: string, toMemberId: string) => void;
+  onDeleteMember?: (id: string) => boolean;
 }
 
 export function MembersSettings({
@@ -40,6 +42,7 @@ export function MembersSettings({
   canDisableMember,
   onToggleStatus,
   onReassignWork,
+  onDeleteMember,
 }: MembersSettingsProps) {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -50,6 +53,7 @@ export function MembersSettings({
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [reassignModalMember, setReassignModalMember] = useState<Member | null>(null);
   const [targetReassignId, setTargetReassignId] = useState('');
+  const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
 
   // Add Member Form
   const [formName, setFormName] = useState('');
@@ -146,7 +150,7 @@ export function MembersSettings({
             className="flex items-center gap-2 text-xs font-semibold bg-[#1765FF] hover:bg-[#155BE5] text-white self-start sm:self-auto"
           >
             <Plus className="w-4 h-4" />
-            <span>Thêm thành viên demo</span>
+            <span>Thêm người phụ trách</span>
           </Button>
         </div>
 
@@ -289,6 +293,18 @@ export function MembersSettings({
                         >
                           {isPaused ? <UserCheck className="w-4 h-4" /> : <UserX className="w-4 h-4" />}
                         </button>
+
+                        {/* Delete Member */}
+                        {onDeleteMember && (
+                          <button
+                            type="button"
+                            onClick={() => setMemberToDelete(m)}
+                            className="p-1.5 text-[#667085] hover:text-[#DC2626] hover:bg-[#FEF2F2] rounded-lg transition-colors"
+                            title="Xóa thành viên"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -299,12 +315,12 @@ export function MembersSettings({
         </div>
       </div>
 
-      {/* MODAL: Thêm thành viên demo */}
+      {/* MODAL: Thêm người phụ trách */}
       {isAddModalOpen && (
         <Modal
           isOpen={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}
-          title="Thêm thành viên demo"
+          title="Thêm người phụ trách mới"
           maxWidth="md"
         >
           <form onSubmit={handleCreateMember} className="space-y-4">
@@ -506,6 +522,51 @@ export function MembersSettings({
               </Button>
               <Button variant="primary" disabled={!targetReassignId} onClick={handleConfirmReassign}>
                 Xác nhận chuyển giao
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL: Xác nhận xóa thành viên */}
+      {memberToDelete && (
+        <Modal
+          isOpen={true}
+          onClose={() => setMemberToDelete(null)}
+          title="Xác nhận xóa thành viên"
+          maxWidth="md"
+        >
+          <div className="space-y-4">
+            <div className="p-3.5 bg-[#FEF2F2] border border-[#FEE2E2] rounded-xl flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
+              <div className="text-xs text-[#B91C1C] space-y-1">
+                <p className="font-bold">Cảnh báo hành động xóa!</p>
+                <p>
+                  Bạn đang chuẩn bị xóa tài khoản người phụ trách <strong>{memberToDelete.name}</strong> ({memberToDelete.email}).
+                </p>
+                <p>
+                  Nếu thành viên đang có hợp đồng, cơ hội kinh doanh hoặc công việc liên kết, bạn cần dùng chức năng <strong>Bàn giao công việc</strong> trước khi xóa.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#E6EBF2]">
+              <Button variant="secondary" onClick={() => setMemberToDelete(null)}>
+                Hủy bỏ
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (onDeleteMember) {
+                    const success = onDeleteMember(memberToDelete.id);
+                    if (success) {
+                      setMemberToDelete(null);
+                    }
+                  }
+                }}
+                className="bg-[#DC2626] hover:bg-[#B91C1C] text-white"
+              >
+                Xóa thành viên
               </Button>
             </div>
           </div>

@@ -17,6 +17,7 @@ interface ContractFormProps {
   customers: Customer[];
   members: Member[];
   existingContracts: Contract[];
+  onAddMember?: (member: Omit<Member, 'id'>) => void;
 }
 
 export function ContractForm({
@@ -27,6 +28,7 @@ export function ContractForm({
   customers,
   members,
   existingContracts,
+  onAddMember,
 }: ContractFormProps) {
   // Form Tabs: 1. Thông tin chung, 2. Dịch vụ maintain, 3. Tệp đính kèm
   const [activeTab, setActiveTab] = useState<'general' | 'maintain' | 'attachments'>('general');
@@ -60,6 +62,43 @@ export function ContractForm({
 
   // Errors map
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Quick add member modal state
+  const [isQuickMemberModalOpen, setIsQuickMemberModalOpen] = useState(false);
+  const [quickMemberName, setQuickMemberName] = useState('');
+  const [quickMemberEmail, setQuickMemberEmail] = useState('');
+  const [quickMemberPhone, setQuickMemberPhone] = useState('');
+
+  const handleQuickAddMember = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickMemberName.trim()) return;
+
+    const email = quickMemberEmail.trim() || `${quickMemberName.toLowerCase().replace(/[^a-z0-9]/g, '')}@duotech.vn`;
+    const tempId = `user-${Date.now()}`;
+
+    if (onAddMember) {
+      onAddMember({
+        name: quickMemberName.trim(),
+        email,
+        phone: quickMemberPhone.trim() || '0900 000 000',
+        role: 'Nhân viên kinh doanh',
+        initials: quickMemberName
+          .split(' ')
+          .map((p) => p[0])
+          .slice(-2)
+          .join('')
+          .toUpperCase(),
+        status: 'Hoạt động',
+        joinedDate: new Date().toLocaleDateString('vi-VN'),
+      });
+      setAssigneeId(tempId);
+    }
+
+    setQuickMemberName('');
+    setQuickMemberEmail('');
+    setQuickMemberPhone('');
+    setIsQuickMemberModalOpen(false);
+  };
 
   // Populate data
   useEffect(() => {
@@ -251,7 +290,8 @@ export function ContractForm({
   if (!isOpen) return null;
 
   return (
-    <Modal
+    <>
+      <Modal
       isOpen={isOpen}
       onClose={onClose}
       title={initialData ? `Chỉnh sửa hợp đồng: ${initialData.contractCode}` : 'Thêm hợp đồng mới'}
@@ -454,9 +494,18 @@ export function ContractForm({
             {/* Row 4: Assignee & Sign Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
-                <label className="block text-xs font-semibold text-[#344054] mb-1">
-                  Người phụ trách <span className="text-[#DC2626]">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[#344054]">
+                    Người phụ trách <span className="text-[#DC2626]">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsQuickMemberModalOpen(true)}
+                    className="text-[11px] text-[#1765FF] hover:underline font-semibold"
+                  >
+                    + Thêm mới
+                  </button>
+                </div>
                 <select
                   value={assigneeId}
                   onChange={(e) => setAssigneeId(e.target.value)}
@@ -627,5 +676,71 @@ export function ContractForm({
         </div>
       </form>
     </Modal>
+
+    {/* Quick Add Member Modal */}
+    {isQuickMemberModalOpen && (
+      <Modal
+        isOpen={isQuickMemberModalOpen}
+        onClose={() => setIsQuickMemberModalOpen(false)}
+        title="Thêm người phụ trách mới"
+        maxWidth="sm"
+      >
+        <form onSubmit={handleQuickAddMember} className="space-y-3.5">
+          <div>
+            <label className="block text-xs font-semibold text-[#344054] mb-1">
+              Họ và tên <span className="text-[#DC2626]">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={quickMemberName}
+              onChange={(e) => setQuickMemberName(e.target.value)}
+              placeholder="Nguyễn Văn A"
+              className="w-full h-9 px-3 bg-white border border-[#D0D5DD] rounded-xl text-xs sm:text-sm text-[#101828] focus:outline-none focus:ring-2 focus:ring-[#1765FF]/20"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[#344054] mb-1">
+              Email công việc
+            </label>
+            <input
+              type="email"
+              value={quickMemberEmail}
+              onChange={(e) => setQuickMemberEmail(e.target.value)}
+              placeholder="vana@duotech.vn"
+              className="w-full h-9 px-3 bg-white border border-[#D0D5DD] rounded-xl text-xs sm:text-sm text-[#101828] focus:outline-none focus:ring-2 focus:ring-[#1765FF]/20"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[#344054] mb-1">
+              Số điện thoại liên hệ
+            </label>
+            <input
+              type="text"
+              value={quickMemberPhone}
+              onChange={(e) => setQuickMemberPhone(e.target.value)}
+              placeholder="0901 234 567"
+              className="w-full h-9 px-3 bg-white border border-[#D0D5DD] rounded-xl text-xs sm:text-sm text-[#101828] focus:outline-none focus:ring-2 focus:ring-[#1765FF]/20"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#E6EBF2]">
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => setIsQuickMemberModalOpen(false)}
+            >
+              Hủy
+            </Button>
+            <Button variant="primary" type="submit">
+              Lưu & Chọn người này
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    )}
+    </>
   );
 }

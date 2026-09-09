@@ -103,6 +103,7 @@ interface CRMContextType {
   canDisableMember: (id: string) => { canDisable: boolean; reason?: string; linkedContractsCount: number; linkedTasksCount: number; linkedDealsCount: number };
   toggleMemberStatus: (id: string) => boolean;
   reassignMemberWork: (fromMemberId: string, toMemberId: string) => void;
+  deleteMember: (id: string) => boolean;
 
   // Common UI Actions
   showToast: (title: string, description?: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
@@ -983,6 +984,46 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const deleteMember = (id: string): boolean => {
+    const targetMember = members.find((m) => m.id === id);
+    if (!targetMember) return false;
+
+    // Check if last active admin
+    const activeAdmins = members.filter((m) => m.role === 'Quản trị viên' && m.status === 'Hoạt động');
+    if (targetMember.role === 'Quản trị viên' && activeAdmins.length <= 1) {
+      showToast('Không thể xóa', 'Phải giữ lại ít nhất 1 Quản trị viên hoạt động trong hệ thống', 'error');
+      return false;
+    }
+
+    if (members.length <= 1) {
+      showToast('Không thể xóa', 'Hệ thống cần ít nhất 1 thành viên', 'error');
+      return false;
+    }
+
+    // Count linked active items
+    const linkedContractsCount = contracts.filter((c) => c.assigneeId === id && !c.isArchived).length;
+    const linkedTasksCount = tasks.filter((t) => t.assigneeId === id && !t.completed).length;
+    const linkedDealsCount = deals.filter((d) => d.assigneeId === id && d.stage !== 'Thắng' && d.stage !== 'Thua').length;
+
+    if (linkedContractsCount > 0 || linkedTasksCount > 0 || linkedDealsCount > 0) {
+      showToast(
+        'Không thể xóa thành viên',
+        `Thành viên đang phụ trách ${linkedContractsCount} hợp đồng, ${linkedDealsCount} cơ hội và ${linkedTasksCount} việc chưa xong. Hãy bàn giao công việc trước khi xóa.`,
+        'error'
+      );
+      return false;
+    }
+
+    setMembers((prev) => prev.filter((m) => m.id !== id));
+    showToast('Đã xóa thành viên', targetMember.name, 'info');
+
+    fetch(`/api/members/${id}`, { method: 'DELETE' }).catch((err) => {
+      console.error('Failed to delete member from MongoDB', err);
+    });
+
+    return true;
+  };
+
   // Uncompleted tasks for badge on sidebar (for current user)
   const uncompletedTasksCount = useMemo(() => {
     const currentUserId = settings.currentUser.id;
@@ -1105,6 +1146,7 @@ export function CRMProvider({ children }: { children: ReactNode }) {
         canDisableMember,
         toggleMemberStatus,
         reassignMemberWork,
+        deleteMember,
         showToast,
         dismissToast,
         setTimeRange,
