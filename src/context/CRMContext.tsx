@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import {
   Customer,
   Deal,
@@ -9,22 +9,14 @@ import {
   CalendarEvent,
   Member,
   UserSettings,
+  Workspace,
   TimeRangeFilter,
   ChartPeriod,
   ToastMessage,
   KPICardData,
   DealStage,
 } from '@/types/crm';
-import {
-  INITIAL_CUSTOMERS,
-  INITIAL_DEALS,
-  INITIAL_CONTRACTS,
-  INITIAL_TASKS,
-  INITIAL_CALENDAR_EVENTS,
-  MEMBERS,
-  INITIAL_SETTINGS,
-  KPI_DATA_MAP,
-} from '@/data/mockData';
+import { MEMBERS, INITIAL_SETTINGS, KPI_DATA_MAP } from '@/data/mockData';
 
 interface CanDeleteCustomerResult {
   canDelete: boolean;
@@ -35,7 +27,16 @@ interface CanDeleteCustomerResult {
 }
 
 interface CRMContextType {
-  // Core Entities
+  // Workspaces
+  workspaces: Workspace[];
+  activeWorkspace: Workspace | null;
+  activeWorkspaceId: string;
+  switchWorkspace: (workspaceId: string) => Promise<void>;
+  createWorkspace: (data: Omit<Workspace, 'id' | 'createdAt'>) => Promise<Workspace>;
+  updateWorkspace: (id: string, updates: Partial<Workspace>) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<boolean>;
+
+  // Core Entities (Clean, Scoped to active workspace)
   customers: Customer[];
   deals: Deal[];
   contracts: Contract[];
@@ -53,6 +54,8 @@ interface CRMContextType {
   kpiStats: KPICardData[];
   isCommandMenuOpen: boolean;
   setIsCommandMenuOpen: (open: boolean) => void;
+  isLoading: boolean;
+  refreshData: (wsId?: string) => Promise<void>;
 
   // Helper getters
   getCustomerById: (id: string) => Customer | undefined;
@@ -111,66 +114,106 @@ interface CRMContextType {
 
 const CRMContext = createContext<CRMContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'duotech_crm_data_v1';
-const LEGACY_STORAGE_KEY = 'nexa_crm_data_v2';
+const ACTIVE_WS_KEY = 'duotech_crm_active_ws_id';
 
 export function CRMProvider({ children }: { children: ReactNode }) {
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
-  const [deals, setDeals] = useState<Deal[]>(INITIAL_DEALS);
-  const [contracts, setContracts] = useState<Contract[]>(INITIAL_CONTRACTS);
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(INITIAL_CALENDAR_EVENTS);
+  // Workspaces State
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>('ws-default');
+
+  // Core Data Entities: Start completely empty (Clean Production State)
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [members, setMembers] = useState<Member[]>(MEMBERS);
   const [settings, setSettings] = useState<UserSettings>(INITIAL_SETTINGS);
 
   const [timeRange, setTimeRange] = useState<TimeRangeFilter>('2026-09');
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('month');
   const [toast, setToast] = useState<ToastMessage | null>(null);
-  const [workspace, setWorkspace] = useState('Công ty TNHH Demo');
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Load from localStorage
-  useEffect(() => {
+  const activeWorkspace = useMemo(() => {
+    return workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0] || null;
+  }, [workspaces, activeWorkspaceId]);
+
+  const workspace = activeWorkspace?.name || 'Duotech Solution';
+
+  const showToast = useCallback(
+    (
+      title: string,
+      description?: string,
+      type: 'success' | 'error' | 'info' | 'warning' = 'success'
+    ) => {
+      setToast({
+        id: Math.random().toString(36).substring(2, 9),
+        title,
+        description,
+        type,
+      });
+    },
+    []
+  );
+
+  const dismissToast = () => {
+    setToast(null);
+  };
+
+  // Fetch all CRM data for a given workspace
+  const refreshData = useCallback(async (targetWsId?: string) => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.customers) setCustomers(parsed.customers);
-        if (parsed.deals) setDeals(parsed.deals);
-        if (parsed.contracts) setContracts(parsed.contracts);
-        if (parsed.tasks) setTasks(parsed.tasks);
-        if (parsed.calendarEvents) setCalendarEvents(parsed.calendarEvents);
-        if (parsed.members) setMembers(parsed.members);
-        if (parsed.settings) setSettings(parsed.settings);
-        if (parsed.workspace) setWorkspace(parsed.workspace);
+      setIsLoading(true);
+      const wsId = targetWsId || localStorage.getItem(ACTIVE_WS_KEY) || 'ws-default';
+      const res = await fetch(`/api/init?workspaceId=${encodeURIComponent(wsId)}`);
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
       }
-    } catch (e) {
-      console.error('Failed to load CRM state from localStorage', e);
+      const json = await res.json();
+      if (json.success && json.data) {
+        const {
+          workspaces: dbWorkspaces,
+          activeWorkspace: dbActiveWs,
+          activeWorkspaceId: dbActiveWsId,
+          customers: dbCustomers,
+          deals: dbDeals,
+          contracts: dbContracts,
+          tasks: dbTasks,
+          calendarEvents: dbCalendarEvents,
+          members: dbMembers,
+          settings: dbSettings,
+        } = json.data;
+
+        if (Array.isArray(dbWorkspaces)) {
+          setWorkspaces(dbWorkspaces);
+        }
+
+        const resolvedWsId = dbActiveWsId || (dbActiveWs ? dbActiveWs.id : wsId);
+        setActiveWorkspaceId(resolvedWsId);
+        localStorage.setItem(ACTIVE_WS_KEY, resolvedWsId);
+
+        setCustomers(Array.isArray(dbCustomers) ? dbCustomers : []);
+        setDeals(Array.isArray(dbDeals) ? dbDeals : []);
+        setContracts(Array.isArray(dbContracts) ? dbContracts : []);
+        setTasks(Array.isArray(dbTasks) ? dbTasks : []);
+        setCalendarEvents(Array.isArray(dbCalendarEvents) ? dbCalendarEvents : []);
+        if (Array.isArray(dbMembers) && dbMembers.length > 0) setMembers(dbMembers);
+        if (dbSettings) setSettings(dbSettings);
+      }
+    } catch (error) {
+      console.error('Error fetching CRM data from MongoDB:', error);
     } finally {
-      setIsInitialized(true);
+      setIsLoading(false);
     }
   }, []);
 
-  // Save to localStorage
+  // Initial load
   useEffect(() => {
-    if (!isInitialized) return;
-    try {
-      const dataToSave = {
-        customers,
-        deals,
-        contracts,
-        tasks,
-        calendarEvents,
-        members,
-        settings,
-        workspace,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-    } catch (e) {
-      console.error('Failed to save CRM state to localStorage', e);
-    }
-  }, [customers, deals, contracts, tasks, calendarEvents, members, settings, workspace, isInitialized]);
+    const savedWsId = localStorage.getItem(ACTIVE_WS_KEY);
+    refreshData(savedWsId || undefined);
+  }, [refreshData]);
 
   // Toast Auto-Dismiss
   useEffect(() => {
@@ -181,21 +224,83 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const showToast = (
-    title: string,
-    description?: string,
-    type: 'success' | 'error' | 'info' | 'warning' = 'success'
-  ) => {
-    setToast({
-      id: Math.random().toString(36).substring(2, 9),
-      title,
-      description,
-      type,
-    });
+  // Workspace Actions
+  const switchWorkspace = async (wsId: string) => {
+    if (wsId === activeWorkspaceId) return;
+    setActiveWorkspaceId(wsId);
+    localStorage.setItem(ACTIVE_WS_KEY, wsId);
+    const target = workspaces.find((w) => w.id === wsId);
+    showToast('Chuyển Workspace', `Đang tải dữ liệu ${target?.name || ''}`, 'info');
+    await refreshData(wsId);
   };
 
-  const dismissToast = () => {
-    setToast(null);
+  const createWorkspace = async (data: Omit<Workspace, 'id' | 'createdAt'>): Promise<Workspace> => {
+    const res = await fetch('/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to create workspace');
+    }
+
+    const newWs: Workspace = result.data;
+    setWorkspaces((prev) => [...prev, newWs]);
+    showToast('Tạo Workspace thành công', newWs.name, 'success');
+
+    // Automatically switch to the newly created workspace
+    await switchWorkspace(newWs.id);
+    return newWs;
+  };
+
+  const updateWorkspace = async (id: string, updates: Partial<Workspace>) => {
+    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, ...updates } : w)));
+
+    const res = await fetch(`/api/workspaces/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const result = await res.json();
+    if (result.success) {
+      showToast('Cập nhật Workspace thành công', '', 'success');
+    } else {
+      showToast('Lỗi cập nhật Workspace', result.error, 'error');
+    }
+  };
+
+  const deleteWorkspace = async (id: string): Promise<boolean> => {
+    if (workspaces.length <= 1) {
+      showToast('Không thể xóa', 'Phải giữ lại ít nhất 1 workspace', 'error');
+      return false;
+    }
+
+    const res = await fetch(`/api/workspaces/${id}`, { method: 'DELETE' });
+    const result = await res.json();
+    if (!result.success) {
+      showToast('Lỗi khi xóa workspace', result.error, 'error');
+      return false;
+    }
+
+    setWorkspaces((prev) => prev.filter((w) => w.id !== id));
+    showToast('Đã xóa Workspace thành công', '', 'info');
+
+    // If active workspace was deleted, switch to first remaining
+    if (id === activeWorkspaceId) {
+      const remaining = workspaces.filter((w) => w.id !== id);
+      if (remaining.length > 0) {
+        await switchWorkspace(remaining[0].id);
+      }
+    }
+    return true;
+  };
+
+  const setWorkspace = (wsName: string) => {
+    const found = workspaces.find((w) => w.name === wsName);
+    if (found) {
+      switchWorkspace(found.id);
+    }
   };
 
   // Helper getters
@@ -241,15 +346,32 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const newCustomer: Customer = {
       ...customerData,
       id: `cust-${Date.now()}`,
+      workspaceId: activeWorkspaceId,
       createdAt: new Date().toISOString(),
     };
     setCustomers((prev) => [newCustomer, ...prev]);
     showToast('Thêm khách hàng thành công', newCustomer.name, 'success');
+
+    fetch('/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newCustomer),
+    }).catch((err) => {
+      console.error('Failed to save customer to MongoDB', err);
+    });
   };
 
   const updateCustomer = (id: string, updates: Partial<Customer>) => {
     setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
     showToast('Đã cập nhật khách hàng', '', 'success');
+
+    fetch(`/api/customers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((err) => {
+      console.error('Failed to update customer in MongoDB', err);
+    });
   };
 
   const deleteCustomer = (id: string): boolean => {
@@ -261,14 +383,33 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const target = customers.find((c) => c.id === id);
     setCustomers((prev) => prev.filter((c) => c.id !== id));
     showToast('Đã xóa khách hàng', target?.company || target?.name, 'info');
+
+    fetch(`/api/customers/${id}`, { method: 'DELETE' }).catch((err) => {
+      console.error('Failed to delete customer from MongoDB', err);
+    });
     return true;
   };
 
   const archiveCustomer = (id: string) => {
+    let updatedArchived = false;
     setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, isArchived: !c.isArchived } : c))
+      prev.map((c) => {
+        if (c.id === id) {
+          updatedArchived = !c.isArchived;
+          return { ...c, isArchived: updatedArchived };
+        }
+        return c;
+      })
     );
     showToast('Đã lưu trữ khách hàng', 'Hồ sơ đã được đưa vào kho lưu trữ', 'info');
+
+    fetch(`/api/customers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isArchived: updatedArchived }),
+    }).catch((err) => {
+      console.error('Failed to archive customer in MongoDB', err);
+    });
   };
 
   // Deal Actions
@@ -276,6 +417,7 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const newDeal: Deal = {
       ...dealData,
       id: `deal-${Date.now()}`,
+      workspaceId: activeWorkspaceId,
       commentsCount: 0,
       checklistCount: 0,
       createdAt: new Date().toISOString(),
@@ -283,35 +425,71 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     };
     setDeals((prev) => [newDeal, ...prev]);
     showToast('Thêm cơ hội thành công', newDeal.title, 'success');
+
+    fetch('/api/deals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newDeal),
+    }).catch((err) => {
+      console.error('Failed to save deal to MongoDB', err);
+    });
   };
 
   const updateDeal = (id: string, updates: Partial<Deal>) => {
     setDeals((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
     showToast('Cập nhật cơ hội thành công', '', 'success');
+
+    fetch(`/api/deals/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((err) => {
+      console.error('Failed to update deal in MongoDB', err);
+    });
   };
 
   const deleteDeal = (id: string) => {
     setDeals((prev) => prev.filter((d) => d.id !== id));
     showToast('Đã xóa cơ hội', '', 'info');
+
+    fetch(`/api/deals/${id}`, { method: 'DELETE' }).catch((err) => {
+      console.error('Failed to delete deal from MongoDB', err);
+    });
   };
 
   const moveDealStage = (id: string, newStage: DealStage) => {
+    let updatedDeal: Deal | undefined;
     setDeals((prev) =>
       prev.map((d) => {
         if (d.id === id) {
           const history = d.stageHistory || [];
-          return {
+          updatedDeal = {
             ...d,
             stage: newStage,
             stageHistory: [...history, { stage: newStage, date: new Date().toISOString() }],
           };
+          return updatedDeal;
         }
         return d;
       })
     );
+
+    if (updatedDeal) {
+      fetch(`/api/deals/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stage: updatedDeal.stage,
+          stageHistory: updatedDeal.stageHistory,
+        }),
+      }).catch((err) => {
+        console.error('Failed to update deal stage in MongoDB', err);
+      });
+    }
   };
 
   const markDealWon = (id: string) => {
+    const closedAt = new Date().toISOString();
     setDeals((prev) =>
       prev.map((d) =>
         d.id === id
@@ -319,15 +497,29 @@ export function CRMProvider({ children }: { children: ReactNode }) {
               ...d,
               stage: 'Thắng',
               probability: 100,
-              closedAt: new Date().toISOString(),
+              closedAt,
             }
           : d
       )
     );
     showToast('Chúc mừng!', 'Cơ hội đã được đánh dấu Thắng', 'success');
+
+    fetch(`/api/deals/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stage: 'Thắng',
+        probability: 100,
+        closedAt,
+      }),
+    }).catch((err) => {
+      console.error('Failed to mark deal won in MongoDB', err);
+    });
   };
 
   const markDealLost = (id: string, lossReason?: string) => {
+    const closedAt = new Date().toISOString();
+    const reason = lossReason || 'Không phù hợp ngân sách / tính năng';
     setDeals((prev) =>
       prev.map((d) =>
         d.id === id
@@ -335,13 +527,26 @@ export function CRMProvider({ children }: { children: ReactNode }) {
               ...d,
               stage: 'Thua',
               probability: 0,
-              lossReason: lossReason || 'Không phù hợp ngân sách / tính năng',
-              closedAt: new Date().toISOString(),
+              lossReason: reason,
+              closedAt,
             }
           : d
       )
     );
     showToast('Đã đánh dấu thua', 'Cơ hội đã được chuyển sang danh sách Đóng', 'info');
+
+    fetch(`/api/deals/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stage: 'Thua',
+        probability: 0,
+        lossReason: reason,
+        closedAt,
+      }),
+    }).catch((err) => {
+      console.error('Failed to mark deal lost in MongoDB', err);
+    });
   };
 
   // Contract Actions
@@ -349,43 +554,84 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const newContract: Contract = {
       ...contractData,
       id: `cont-${Date.now()}`,
+      workspaceId: activeWorkspaceId,
       createdAt: new Date().toISOString(),
     };
     setContracts((prev) => [newContract, ...prev]);
     showToast('Tạo hợp đồng thành công', newContract.contractCode, 'success');
+
+    fetch('/api/contracts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newContract),
+    }).catch((err) => {
+      console.error('Failed to save contract to MongoDB', err);
+    });
   };
 
   const updateContract = (id: string, updates: Partial<Contract>) => {
     setContracts((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
     showToast('Cập nhật hợp đồng thành công', '', 'success');
+
+    fetch(`/api/contracts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((err) => {
+      console.error('Failed to update contract in MongoDB', err);
+    });
   };
 
   const deleteContract = (id: string) => {
     setContracts((prev) => prev.filter((c) => c.id !== id));
     showToast('Đã xóa hợp đồng vĩnh viễn', '', 'info');
+
+    fetch(`/api/contracts/${id}`, { method: 'DELETE' }).catch((err) => {
+      console.error('Failed to delete contract from MongoDB', err);
+    });
   };
 
   const archiveContract = (id: string) => {
+    let updatedContract: Contract | undefined;
     setContracts((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              isArchived: !c.isArchived,
-              history: [
-                ...(c.history || []),
-                {
-                  id: `h-${Date.now()}`,
-                  timestamp: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-                  authorName: settings.profile?.name || settings.currentUser.name,
-                  action: c.isArchived ? 'Bỏ lưu trữ hợp đồng' : 'Lưu trữ hợp đồng',
-                },
-              ],
-            }
-          : c
-      )
+      prev.map((c) => {
+        if (c.id === id) {
+          const updated = {
+            ...c,
+            isArchived: !c.isArchived,
+            history: [
+              ...(c.history || []),
+              {
+                id: `h-${Date.now()}`,
+                timestamp:
+                  new Date().toLocaleDateString('vi-VN') +
+                  ' ' +
+                  new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+                authorName: settings.profile?.name || settings.currentUser.name,
+                action: c.isArchived ? 'Bỏ lưu trữ hợp đồng' : 'Lưu trữ hợp đồng',
+              },
+            ],
+          };
+          updatedContract = updated;
+          return updated;
+        }
+        return c;
+      })
     );
     showToast('Đã cập nhật trạng thái lưu trữ hợp đồng', '', 'info');
+
+    if (updatedContract) {
+      fetch(`/api/contracts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isArchived: updatedContract.isArchived,
+          history: updatedContract.history,
+        }),
+      }).catch((err) => {
+        console.error('Failed to update contract archive status in MongoDB', err);
+      });
+    }
   };
 
   const importContracts = (newContractsData: Omit<Contract, 'id' | 'createdAt'>[]) => {
@@ -393,11 +639,21 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const formattedContracts: Contract[] = newContractsData.map((c, idx) => ({
       ...c,
       id: `cont-${timestamp}-${idx}`,
+      workspaceId: activeWorkspaceId,
       createdAt: new Date().toISOString(),
     }));
 
     setContracts((prev) => [...formattedContracts, ...prev]);
     showToast('Nhập dữ liệu thành công', `Đã thêm ${formattedContracts.length} hợp đồng mới`, 'success');
+
+    fetch(`/api/contracts/import?workspaceId=${encodeURIComponent(activeWorkspaceId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formattedContracts),
+    }).catch((err) => {
+      console.error('Failed to import contracts to MongoDB', err);
+    });
+
     return formattedContracts.length;
   };
 
@@ -406,36 +662,72 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const newTask: Task = {
       ...taskData,
       id: `task-${Date.now()}`,
+      workspaceId: activeWorkspaceId,
       createdAt: new Date().toISOString(),
     };
     setTasks((prev) => [newTask, ...prev]);
     showToast('Tạo công việc thành công', newTask.title, 'success');
+
+    fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newTask),
+    }).catch((err) => {
+      console.error('Failed to save task to MongoDB', err);
+    });
   };
 
   const updateTask = (id: string, updates: Partial<Task>) => {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
     showToast('Đã cập nhật công việc', '', 'success');
+
+    fetch(`/api/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((err) => {
+      console.error('Failed to update task in MongoDB', err);
+    });
   };
 
   const deleteTask = (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
     showToast('Đã xóa công việc', '', 'info');
+
+    fetch(`/api/tasks/${id}`, { method: 'DELETE' }).catch((err) => {
+      console.error('Failed to delete task from MongoDB', err);
+    });
   };
 
   const toggleTask = (id: string) => {
+    let nextCompleted = false;
+    let nextStatus: Task['status'] = 'Cần làm';
+
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id === id) {
-          const nextCompleted = !t.completed;
+          nextCompleted = !t.completed;
+          nextStatus = nextCompleted ? 'Hoàn thành' : 'Cần làm';
           return {
             ...t,
             completed: nextCompleted,
-            status: nextCompleted ? 'Hoàn thành' : 'Cần làm',
+            status: nextStatus,
           };
         }
         return t;
       })
     );
+
+    fetch(`/api/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        completed: nextCompleted,
+        status: nextStatus,
+      }),
+    }).catch((err) => {
+      console.error('Failed to toggle task in MongoDB', err);
+    });
   };
 
   // Calendar Actions
@@ -455,15 +747,29 @@ export function CRMProvider({ children }: { children: ReactNode }) {
   const addCalendarEvent = (eventData: Omit<CalendarEvent, 'id'>): boolean => {
     const conflict = checkCalendarConflict(eventData);
     if (conflict) {
-      showToast('Cảnh báo trùng lịch!', `Người phụ trách đã có lịch "${conflict.title}" từ ${conflict.startTime} đến ${conflict.endTime}`, 'warning');
+      showToast(
+        'Cảnh báo trùng lịch!',
+        `Người phụ trách đã có lịch "${conflict.title}" từ ${conflict.startTime} đến ${conflict.endTime}`,
+        'warning'
+      );
     }
 
     const newEvent: CalendarEvent = {
       ...eventData,
       id: `cal-${Date.now()}`,
+      workspaceId: activeWorkspaceId,
     };
     setCalendarEvents((prev) => [...prev, newEvent]);
     showToast('Tạo lịch hẹn thành công', `${newEvent.title} (${newEvent.startTime} - ${newEvent.endTime})`, 'success');
+
+    fetch('/api/calendar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newEvent),
+    }).catch((err) => {
+      console.error('Failed to save calendar event to MongoDB', err);
+    });
+
     return true;
   };
 
@@ -474,25 +780,48 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const merged = { ...currentEvent, ...updates };
     const conflict = checkCalendarConflict(merged, id);
     if (conflict) {
-      showToast('Cảnh báo trùng lịch!', `Người phụ trách đã có lịch "${conflict.title}" từ ${conflict.startTime} đến ${conflict.endTime}`, 'warning');
+      showToast(
+        'Cảnh báo trùng lịch!',
+        `Người phụ trách đã có lịch "${conflict.title}" từ ${conflict.startTime} đến ${conflict.endTime}`,
+        'warning'
+      );
     }
 
     setCalendarEvents((prev) => prev.map((e) => (e.id === id ? merged : e)));
     showToast('Cập nhật lịch hẹn thành công', '', 'success');
+
+    fetch(`/api/calendar/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((err) => {
+      console.error('Failed to update calendar event in MongoDB', err);
+    });
+
     return true;
   };
 
   const deleteCalendarEvent = (id: string) => {
     setCalendarEvents((prev) => prev.filter((e) => e.id !== id));
     showToast('Đã xóa cuộc hẹn', '', 'info');
+
+    fetch(`/api/calendar/${id}`, { method: 'DELETE' }).catch((err) => {
+      console.error('Failed to delete calendar event from MongoDB', err);
+    });
   };
 
   // Settings & Member Actions
   const updateUserSettings = (newSettings: Partial<UserSettings>) => {
+    let fullUpdatedSettings: UserSettings | undefined;
+
     setSettings((prev) => {
       const updatedProfile = newSettings.profile ? { ...prev.profile, ...newSettings.profile } : prev.profile;
-      const updatedWorkspace = newSettings.workspaceInfo ? { ...prev.workspaceInfo, ...newSettings.workspaceInfo } : prev.workspaceInfo;
-      const updatedNotifications = newSettings.notifications ? { ...prev.notifications, ...newSettings.notifications } : prev.notifications;
+      const updatedWorkspace = newSettings.workspaceInfo
+        ? { ...prev.workspaceInfo, ...newSettings.workspaceInfo }
+        : prev.workspaceInfo;
+      const updatedNotifications = newSettings.notifications
+        ? { ...prev.notifications, ...newSettings.notifications }
+        : prev.notifications;
 
       const updatedCurrentUser = {
         ...prev.currentUser,
@@ -503,20 +832,21 @@ export function CRMProvider({ children }: { children: ReactNode }) {
         phone: updatedProfile.phone,
       };
 
-      // Also sync current member in members array
       setMembers((mList) =>
         mList.map((m) =>
           m.id === updatedCurrentUser.id
-            ? { ...m, name: updatedCurrentUser.name, avatarUrl: updatedCurrentUser.avatarUrl, email: updatedCurrentUser.email, phone: updatedCurrentUser.phone }
+            ? {
+                ...m,
+                name: updatedCurrentUser.name,
+                avatarUrl: updatedCurrentUser.avatarUrl,
+                email: updatedCurrentUser.email,
+                phone: updatedCurrentUser.phone,
+              }
             : m
         )
       );
 
-      if (updatedWorkspace?.name) {
-        setWorkspace(updatedWorkspace.name);
-      }
-
-      return {
+      fullUpdatedSettings = {
         ...prev,
         ...newSettings,
         profile: updatedProfile,
@@ -524,9 +854,21 @@ export function CRMProvider({ children }: { children: ReactNode }) {
         workspaceInfo: updatedWorkspace,
         notifications: updatedNotifications,
       };
+
+      return fullUpdatedSettings;
     });
 
     showToast('Lưu cài đặt thành công', 'Thông tin đã được áp dụng toàn hệ thống', 'success');
+
+    if (fullUpdatedSettings) {
+      fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullUpdatedSettings),
+      }).catch((err) => {
+        console.error('Failed to save settings to MongoDB', err);
+      });
+    }
   };
 
   const addMember = (memberData: Omit<Member, 'id'>) => {
@@ -537,20 +879,41 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     };
     setMembers((prev) => [...prev, newMember]);
     showToast('Thêm thành viên thành công', newMember.name, 'success');
+
+    fetch('/api/members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newMember),
+    }).catch((err) => {
+      console.error('Failed to save member to MongoDB', err);
+    });
   };
 
   const updateMember = (id: string, updates: Partial<Member>) => {
     setMembers((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
     showToast('Đã cập nhật thành viên', '', 'success');
+
+    fetch(`/api/members/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((err) => {
+      console.error('Failed to update member in MongoDB', err);
+    });
   };
 
   const canDisableMember = (id: string) => {
     const targetMember = members.find((m) => m.id === id);
     if (!targetMember) {
-      return { canDisable: false, reason: 'Không tìm thấy thành viên', linkedContractsCount: 0, linkedTasksCount: 0, linkedDealsCount: 0 };
+      return {
+        canDisable: false,
+        reason: 'Không tìm thấy thành viên',
+        linkedContractsCount: 0,
+        linkedTasksCount: 0,
+        linkedDealsCount: 0,
+      };
     }
 
-    // Check if this is the last active admin
     const activeAdmins = members.filter((m) => m.role === 'Quản trị viên' && m.status === 'Hoạt động');
     if (targetMember.role === 'Quản trị viên' && activeAdmins.length <= 1 && targetMember.status === 'Hoạt động') {
       return {
@@ -587,14 +950,37 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     const nextStatus = member.status === 'Hoạt động' ? 'Tạm khóa' : 'Hoạt động';
     setMembers((prev) => prev.map((m) => (m.id === id ? { ...m, status: nextStatus } : m)));
     showToast(`Đã ${nextStatus === 'Tạm khóa' ? 'tạm ngưng' : 'kích hoạt'} thành viên`, member.name, 'success');
+
+    fetch(`/api/members/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: nextStatus }),
+    }).catch((err) => {
+      console.error('Failed to toggle member status in MongoDB', err);
+    });
+
     return true;
   };
 
   const reassignMemberWork = (fromMemberId: string, toMemberId: string) => {
-    setContracts((prev) => prev.map((c) => (c.assigneeId === fromMemberId ? { ...c, assigneeId: toMemberId } : c)));
-    setTasks((prev) => prev.map((t) => (t.assigneeId === fromMemberId ? { ...t, assigneeId: toMemberId } : t)));
-    setDeals((prev) => prev.map((d) => (d.assigneeId === fromMemberId ? { ...d, assigneeId: toMemberId } : d)));
+    setContracts((prev) =>
+      prev.map((c) => (c.assigneeId === fromMemberId ? { ...c, assigneeId: toMemberId } : c))
+    );
+    setTasks((prev) =>
+      prev.map((t) => (t.assigneeId === fromMemberId ? { ...t, assigneeId: toMemberId } : t))
+    );
+    setDeals((prev) =>
+      prev.map((d) => (d.assigneeId === fromMemberId ? { ...d, assigneeId: toMemberId } : d))
+    );
     showToast('Đã bàn giao công việc thành công', '', 'success');
+
+    fetch('/api/members/reassign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromMemberId, toMemberId }),
+    }).catch((err) => {
+      console.error('Failed to reassign work in MongoDB', err);
+    });
   };
 
   // Uncompleted tasks for badge on sidebar (for current user)
@@ -603,13 +989,72 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     return tasks.filter((t) => !t.completed && (t.assigneeId === currentUserId || !t.assigneeId)).length;
   }, [tasks, settings.currentUser.id]);
 
+  // Dynamic KPI Stats based on real data
   const kpiStats = useMemo(() => {
-    return KPI_DATA_MAP[timeRange] || KPI_DATA_MAP['2026-09'];
-  }, [timeRange]);
+    // If real data exists, compute dynamic KPIs
+    const totalWonRevenue = contracts
+      .filter((c) => c.status === 'Hoàn thành' || c.status === 'Đang triển khai' || c.status === 'Đang bảo trì')
+      .reduce((sum, c) => sum + (c.paidAmount || c.value || 0), 0);
+
+    const totalDeals = deals.length;
+    const wonDeals = deals.filter((d) => d.stage === 'Thắng').length;
+    const conversionRate = totalDeals > 0 ? Math.round((wonDeals / totalDeals) * 100) : 0;
+    const totalCustomers = customers.length;
+
+    // Formatting revenue nicely in millions
+    const revenueFormatted =
+      totalWonRevenue >= 1_000_000_000
+        ? `${(totalWonRevenue / 1_000_000_000).toFixed(1)} tỷ đ`
+        : totalWonRevenue > 0
+        ? `${(totalWonRevenue / 1_000_000).toFixed(0)} triệu đ`
+        : '0 đ';
+
+    return [
+      {
+        title: 'Tổng doanh thu',
+        value: revenueFormatted,
+        change: totalWonRevenue > 0 ? '+100%' : '0%',
+        isPositive: true,
+        type: 'revenue' as const,
+        subtext: 'tính từ hợp đồng thực tế',
+      },
+      {
+        title: 'Khách hàng',
+        value: totalCustomers.toString(),
+        change: totalCustomers > 0 ? `+${totalCustomers}` : '0',
+        isPositive: true,
+        type: 'customers' as const,
+        subtext: 'trong workspace này',
+      },
+      {
+        title: 'Cơ hội kinh doanh',
+        value: totalDeals.toString(),
+        change: totalDeals > 0 ? `+${totalDeals}` : '0',
+        isPositive: true,
+        type: 'deals' as const,
+        subtext: `${wonDeals} đã chốt thắng`,
+      },
+      {
+        title: 'Tỷ lệ chuyển đổi',
+        value: `${conversionRate}%`,
+        change: `${wonDeals}/${totalDeals || 1}`,
+        isPositive: conversionRate > 0,
+        type: 'conversion' as const,
+        subtext: 'deal thắng / tổng deal',
+      },
+    ];
+  }, [contracts, deals, customers]);
 
   return (
     <CRMContext.Provider
       value={{
+        workspaces,
+        activeWorkspace,
+        activeWorkspaceId,
+        switchWorkspace,
+        createWorkspace,
+        updateWorkspace,
+        deleteWorkspace,
         customers,
         deals,
         contracts,
@@ -625,6 +1070,8 @@ export function CRMProvider({ children }: { children: ReactNode }) {
         kpiStats,
         isCommandMenuOpen,
         setIsCommandMenuOpen,
+        isLoading,
+        refreshData,
         getCustomerById,
         getMemberById,
         getCustomerOpportunityValue,

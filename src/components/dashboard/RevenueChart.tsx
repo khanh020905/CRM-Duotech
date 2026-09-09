@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -10,14 +10,10 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, BarChart2 } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
-import {
-  REVENUE_DATA_MONTHS,
-  REVENUE_DATA_QUARTERS,
-  REVENUE_DATA_YEARS,
-} from '@/data/mockData';
 import { cn } from '@/lib/utils';
+import { RevenuePoint } from '@/types/crm';
 
 interface CustomTooltipProps {
   active?: boolean;
@@ -33,7 +29,7 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
         <p className="text-[#1765FF] font-bold text-sm">
           {data.value} triệu VNĐ
         </p>
-        {data.payload.fullAmount && (
+        {data.payload.fullAmount !== undefined && (
           <p className="text-[11px] text-[#98A2B3] mt-0.5">
             {data.payload.fullAmount.toLocaleString('vi-VN')} đ
           </p>
@@ -45,26 +41,94 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
 }
 
 export function RevenueChart() {
-  const { chartPeriod, setChartPeriod } = useCRM();
+  const { chartPeriod, setChartPeriod, contracts } = useCRM();
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  const getData = () => {
-    switch (chartPeriod) {
-      case 'quarter':
-        return REVENUE_DATA_QUARTERS;
-      case 'year':
-        return REVENUE_DATA_YEARS;
-      case 'month':
-      default:
-        return REVENUE_DATA_MONTHS;
-    }
-  };
+  // Compute revenue dynamically from real contracts
+  const currentData: RevenuePoint[] = useMemo(() => {
+    if (chartPeriod === 'quarter') {
+      const quarters = [
+        { label: 'Q1', value: 0, fullAmount: 0 },
+        { label: 'Q2', value: 0, fullAmount: 0 },
+        { label: 'Q3', value: 0, fullAmount: 0 },
+        { label: 'Q4', value: 0, fullAmount: 0 },
+      ];
 
-  const currentData = getData();
+      contracts.forEach((c) => {
+        const val = c.paidAmount || c.value || 0;
+        let month = 1;
+        if (c.signDate) {
+          if (c.signDate.includes('-')) {
+            month = parseInt(c.signDate.split('-')[1], 10) || 1;
+          } else if (c.signDate.includes('/')) {
+            month = parseInt(c.signDate.split('/')[1], 10) || 1;
+          }
+        }
+        const qIndex = Math.min(3, Math.floor((month - 1) / 3));
+        quarters[qIndex].fullAmount += val;
+      });
+
+      return quarters.map((q) => ({
+        ...q,
+        value: Math.round(q.fullAmount / 1_000_000),
+      }));
+    }
+
+    if (chartPeriod === 'year') {
+      const yearsMap: Record<string, number> = { '2024': 0, '2025': 0, '2026': 0 };
+      contracts.forEach((c) => {
+        const val = c.paidAmount || c.value || 0;
+        let yr = '2026';
+        if (c.signDate) {
+          if (c.signDate.includes('-')) {
+            yr = c.signDate.split('-')[0] || '2026';
+          } else if (c.signDate.includes('/')) {
+            yr = c.signDate.split('/')[2] || '2026';
+          }
+        }
+        if (!yearsMap[yr]) yearsMap[yr] = 0;
+        yearsMap[yr] += val;
+      });
+
+      return Object.entries(yearsMap).map(([yr, fullAmount]) => ({
+        label: yr,
+        value: Math.round(fullAmount / 1_000_000),
+        fullAmount,
+      }));
+    }
+
+    // Default: month view
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      label: `T${i + 1}`,
+      value: 0,
+      fullAmount: 0,
+    }));
+
+    contracts.forEach((c) => {
+      const val = c.paidAmount || c.value || 0;
+      let month = 1;
+      if (c.signDate) {
+        if (c.signDate.includes('-')) {
+          month = parseInt(c.signDate.split('-')[1], 10) || 1;
+        } else if (c.signDate.includes('/')) {
+          month = parseInt(c.signDate.split('/')[1], 10) || 1;
+        }
+      }
+      const idx = Math.max(0, Math.min(11, month - 1));
+      months[idx].fullAmount += val;
+    });
+
+    return months.map((m) => ({
+      ...m,
+      value: Math.round(m.fullAmount / 1_000_000),
+    }));
+  }, [contracts, chartPeriod]);
+
+  const hasData = contracts.length > 0;
 
   return (
     <div className="bg-white rounded-[12px] border border-[#E6EBF2] p-5 sm:p-6 shadow-2xs flex flex-col h-full">
@@ -74,9 +138,12 @@ export function RevenueChart() {
           <div className="text-[#1765FF]">
             <TrendingUp className="w-5 h-5 stroke-[2.5]" />
           </div>
-          <h2 className="text-base font-semibold text-[#101828]">
-            Doanh thu theo thời gian
-          </h2>
+          <div>
+            <h2 className="text-base font-semibold text-[#101828]">
+              Doanh thu theo thời gian
+            </h2>
+            <p className="text-xs text-[#667085]">Tổng hợp từ hợp đồng thực tế</p>
+          </div>
         </div>
 
         {/* Period Selector Tabs - Segmented Control */}
@@ -94,7 +161,7 @@ export function RevenueChart() {
                 type="button"
                 onClick={() => setChartPeriod(period)}
                 className={cn(
-                  'px-3 py-1 rounded-[6px] text-xs font-medium transition-all select-none',
+                  'px-3 py-1 rounded-[6px] text-xs font-medium transition-all select-none cursor-pointer',
                   isActive
                     ? 'bg-white text-[#101828] shadow-xs font-semibold'
                     : 'text-[#667085] hover:text-[#101828]'
@@ -108,7 +175,7 @@ export function RevenueChart() {
       </div>
 
       {/* Chart Area */}
-      <div className="w-full h-64 sm:h-72 mt-2">
+      <div className="w-full h-64 sm:h-72 mt-2 relative">
         {isMounted ? (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
@@ -121,31 +188,20 @@ export function RevenueChart() {
                   <stop offset="95%" stopColor="#1765FF" stopOpacity={0.0} />
                 </linearGradient>
               </defs>
-
-              <CartesianGrid
-                strokeDasharray="0 0"
-                vertical={false}
-                stroke="#F1F4F9"
-              />
-
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F2F4F7" />
               <XAxis
                 dataKey="label"
                 tickLine={false}
                 axisLine={false}
-                tick={{ fill: '#667085', fontSize: 11 }}
-                dy={10}
+                tick={{ fill: '#667085', fontSize: 12 }}
               />
-
               <YAxis
                 tickLine={false}
                 axisLine={false}
                 tick={{ fill: '#667085', fontSize: 11 }}
-                tickFormatter={(val) => `${val}${chartPeriod === 'year' ? ' tỷ' : ' triệu'}`}
-                dx={-5}
+                unit=" tr"
               />
-
               <Tooltip content={<CustomTooltip />} />
-
               <Area
                 type="monotone"
                 dataKey="value"
@@ -153,24 +209,16 @@ export function RevenueChart() {
                 strokeWidth={2.5}
                 fillOpacity={1}
                 fill="url(#revenueGradient)"
-                dot={{
-                  r: 4,
-                  fill: '#1765FF',
-                  stroke: '#FFFFFF',
-                  strokeWidth: 2,
-                }}
-                activeDot={{
-                  r: 6,
-                  fill: '#1765FF',
-                  stroke: '#FFFFFF',
-                  strokeWidth: 2,
-                }}
               />
             </AreaChart>
           </ResponsiveContainer>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-[#F8FAFC] rounded-lg">
-            <span className="text-xs text-[#98A2B3]">Đang tải biểu đồ...</span>
+        ) : null}
+
+        {!hasData && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 backdrop-blur-[1px] rounded-lg pointer-events-none">
+            <BarChart2 className="w-8 h-8 text-[#98A2B3] mb-2 stroke-[1.5]" />
+            <p className="text-xs font-medium text-[#475467]">Chưa có dữ liệu hợp đồng</p>
+            <p className="text-[11px] text-[#98A2B3]">Thêm hợp đồng mới để bắt đầu theo dõi doanh thu</p>
           </div>
         )}
       </div>

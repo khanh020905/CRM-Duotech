@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useCRM } from '@/context/CRMContext';
-import { formatCurrency, cn } from '@/lib/utils';
-import { Button } from '@/components/ui/Button';
 import { Avatar } from '@/components/common/Avatar';
+import { Button } from '@/components/ui/Button';
+import { cn, formatCurrency } from '@/lib/utils';
 import {
   BarChart,
   Bar,
@@ -19,44 +19,156 @@ import {
   Cell,
 } from 'recharts';
 import {
-  REPORT_REVENUE_VS_TARGET,
-  REPORT_CUSTOMER_SOURCES,
-  REPORT_TEAM_PERFORMANCE,
-  REPORT_CONVERSION_FUNNEL,
-} from '@/data/mockData';
-import {
   Coins,
   BarChart3,
   Target,
-  Clock,
+  Users,
   Download,
   Calendar,
   ArrowUp,
-  ArrowDown,
+  Inbox,
 } from 'lucide-react';
 
+const SOURCE_COLORS: Record<string, string> = {
+  Website: '#1765FF',
+  'Giới thiệu': '#059669',
+  Facebook: '#7C3AED',
+  'Sự kiện': '#D97706',
+  'Khách hàng cũ': '#0284C7',
+  'Đối tác': '#DB2777',
+  'Hội thảo': '#4F46E5',
+  'Tìm kiếm': '#10B981',
+  Khác: '#64748B',
+};
+
+const STAGE_COLORS: Record<string, string> = {
+  Mới: '#1765FF',
+  'Đã liên hệ': '#3B82F6',
+  'Đề xuất': '#60A5FA',
+  'Đàm phán': '#93C5FD',
+  Thắng: '#10B981',
+  Thua: '#EF4444',
+};
+
 export default function ReportsPage() {
-  const { showToast } = useCRM();
+  const { customers, deals, contracts, members, showToast, activeWorkspace } = useCRM();
   const [activeTab, setActiveTab] = useState<'overview' | 'revenue' | 'conversion' | 'team'>('overview');
+
+  // KPI Calculations
+  const wonRevenue = useMemo(() => {
+    return contracts
+      .filter((c) => c.status === 'Hoàn thành' || c.status === 'Đang triển khai' || c.status === 'Đang bảo trì')
+      .reduce((sum, c) => sum + (c.paidAmount || c.value || 0), 0);
+  }, [contracts]);
+
+  const wonDealsCount = useMemo(() => {
+    return deals.filter((d) => d.stage === 'Thắng').length;
+  }, [deals]);
+
+  const winRate = useMemo(() => {
+    return deals.length > 0 ? Math.round((wonDealsCount / deals.length) * 100) : 0;
+  }, [deals, wonDealsCount]);
+
+  // Revenue vs Target (Months of 2026)
+  const revenueVsTargetData = useMemo(() => {
+    const months = ['T4', 'T5', 'T6', 'T7', 'T8', 'T9'];
+    return months.map((m, idx) => {
+      const targetMonth = idx + 4; // 4 to 9
+      const actualMonthContracts = contracts.filter((c) => {
+        if (!c.signDate) return false;
+        let month = 0;
+        if (c.signDate.includes('-')) month = parseInt(c.signDate.split('-')[1], 10);
+        else if (c.signDate.includes('/')) month = parseInt(c.signDate.split('/')[1], 10);
+        return month === targetMonth;
+      });
+
+      const actualSum = actualMonthContracts.reduce((s, c) => s + (c.paidAmount || c.value || 0), 0);
+      const actualMillions = Math.round(actualSum / 1_000_000);
+      const targetMillions = 150; // Reference benchmark target
+
+      return {
+        month: m,
+        actual: actualMillions,
+        target: targetMillions,
+      };
+    });
+  }, [contracts]);
+
+  // Customer Sources Distribution
+  const customerSourcesData = useMemo(() => {
+    if (customers.length === 0) return [];
+    const map: Record<string, number> = {};
+    customers.forEach((c) => {
+      const src = c.source || 'Khác';
+      map[src] = (map[src] || 0) + 1;
+    });
+
+    return Object.entries(map).map(([name, count]) => ({
+      name,
+      count,
+      percent: Math.round((count / customers.length) * 100),
+      color: SOURCE_COLORS[name] || '#94A3B8',
+    }));
+  }, [customers]);
+
+  // Team Performance
+  const teamPerformanceData = useMemo(() => {
+    return members.map((member, idx) => {
+      const memberDeals = deals.filter((d) => d.assigneeId === member.id);
+      const memberWon = memberDeals.filter((d) => d.stage === 'Thắng');
+      const memberContracts = contracts.filter((c) => c.assigneeId === member.id);
+      const revenue = memberContracts.reduce((s, c) => s + (c.paidAmount || c.value || 0), 0);
+      const target = 100_000_000;
+      const targetPercent = target > 0 ? Math.min(100, Math.round((revenue / target) * 100)) : 0;
+      const colors = ['#1765FF', '#059669', '#7C3AED', '#D97706', '#DB2777'];
+
+      return {
+        member,
+        dealsCount: memberDeals.length,
+        wonCount: memberWon.length,
+        revenue,
+        targetPercent,
+        color: colors[idx % colors.length],
+      };
+    });
+  }, [members, deals, contracts]);
+
+  // Conversion Funnel
+  const conversionFunnelData = useMemo(() => {
+    const stages = ['Mới', 'Đã liên hệ', 'Đề xuất', 'Đàm phán', 'Thắng'];
+    const total = deals.length || 1;
+
+    return stages.map((stage) => {
+      const count = deals.filter((d) => d.stage === stage).length;
+      const percent = deals.length > 0 ? Math.round((count / total) * 100) : 0;
+      return {
+        stage,
+        count,
+        percent,
+        color: STAGE_COLORS[stage] || '#1765FF',
+      };
+    });
+  }, [deals]);
 
   // Export report data to CSV
   const handleExportReport = () => {
     const csvContent =
       '\uFEFF' +
       [
-        'BÁO CÁO KINH DOANH DUOTECH CRM - THÁNG 9/2026',
+        `BÁO CÁO KINH DOANH - ${activeWorkspace?.name || 'DUOTECH CRM'}`,
+        `Thời gian xuất: ${new Date().toLocaleDateString('vi-VN')}`,
         '',
         '1. CHỈ SỐ TỔNG QUAN',
-        'Chỉ số,Giá trị,Biến động so với tháng trước',
-        'Doanh thu chốt thắng,328.5 triệu,+12.8%',
-        'Số deal đã chốt,42,+10 deal',
-        'Tỷ lệ thắng,28%,+3.4%',
-        'Chu kỳ bán hàng,18 ngày,-2 ngày',
+        'Chỉ số,Giá trị',
+        `Doanh thu chốt thắng,${formatCurrency(wonRevenue)}`,
+        `Số deal đã chốt,${wonDealsCount}`,
+        `Tỷ lệ thắng,${winRate}%`,
+        `Tổng số khách hàng,${customers.length}`,
         '',
         '2. HIỆU SUẤT ĐỘI NGŨ',
-        'Nhân viên,Số cơ hội,Đã chốt,Doanh thu (VNĐ),Hoàn thành mục tiêu',
-        ...REPORT_TEAM_PERFORMANCE.map(
-          (t) => `"${t.member.name}",${t.dealsCount},${t.wonCount},${t.revenue},${t.targetPercent}%`
+        'Nhân viên,Số cơ hội,Đã chốt,Doanh thu (VNĐ)',
+        ...teamPerformanceData.map(
+          (t) => `"${t.member.name}",${t.dealsCount},${t.wonCount},${t.revenue}`
         ),
       ].join('\n');
 
@@ -64,7 +176,7 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `DuotechCRM_BaoCao_KinhDoanh_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `BaoCao_${activeWorkspace?.slug || 'Duotech'}_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -80,14 +192,14 @@ export default function ReportsPage() {
             Báo cáo kinh doanh
           </h1>
           <p className="text-sm text-[#667085] mt-1 font-normal">
-            Đo lường hiệu quả và tối ưu hoạt động bán hàng.
+            Không gian làm việc: <span className="font-semibold text-[#1765FF]">{activeWorkspace?.name || 'Duotech Solution'}</span>
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="h-10 px-3.5 bg-white border border-[#E6EBF2] rounded-lg flex items-center gap-2 text-xs font-semibold text-[#344054] shadow-2xs">
             <Calendar className="w-3.5 h-3.5 text-[#667085]" />
-            <span>Tháng 9, 2026</span>
+            <span>Năm 2026</span>
           </div>
 
           <Button
@@ -101,7 +213,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Sub-tabs - Matching Image 5 */}
+      {/* Sub-tabs */}
       <div className="flex items-center gap-2 mb-6">
         {[
           { id: 'overview', label: 'Tổng quan' },
@@ -111,9 +223,9 @@ export default function ReportsPage() {
         ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
+            onClick={() => setActiveTab(tab.id as 'overview' | 'revenue' | 'conversion' | 'team')}
             className={cn(
-              'px-4 py-2 rounded-xl text-xs font-semibold transition-all select-none',
+              'px-4 py-2 rounded-xl text-xs font-semibold transition-all select-none cursor-pointer',
               activeTab === tab.id
                 ? 'bg-[#1765FF] text-white shadow-sm'
                 : 'bg-white border border-[#E6EBF2] text-[#475467] hover:bg-[#F8FAFC]'
@@ -124,7 +236,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* 4 KPI Cards - Matching Image 5 */}
+      {/* 4 KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
         {/* Doanh thu */}
         <div className="bg-white rounded-[12px] border border-[#E6EBF2] p-5 shadow-2xs">
@@ -134,11 +246,13 @@ export default function ReportsPage() {
             </div>
             <div>
               <span className="text-xs text-[#667085] font-medium block">Doanh thu chốt thắng</span>
-              <div className="text-2xl sm:text-[26px] font-bold text-[#101828]">328,5 triệu</div>
+              <div className="text-xl sm:text-[22px] font-bold text-[#101828]">
+                {formatCurrency(wonRevenue)}
+              </div>
               <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#059669]">
                 <ArrowUp className="w-3 h-3 stroke-[2.5]" />
-                <span>+12,8%</span>
-                <span className="text-[10px] text-[#98A2B3] font-normal">so với tháng trước</span>
+                <span>Thực tế</span>
+                <span className="text-[10px] text-[#98A2B3] font-normal">từ hợp đồng</span>
               </div>
             </div>
           </div>
@@ -151,12 +265,10 @@ export default function ReportsPage() {
               <BarChart3 className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-xs text-[#667085] font-medium block">Đã chốt</span>
-              <div className="text-2xl sm:text-[26px] font-bold text-[#101828]">42</div>
-              <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#059669]">
-                <ArrowUp className="w-3 h-3 stroke-[2.5]" />
-                <span>+10</span>
-                <span className="text-[10px] text-[#98A2B3] font-normal">so với tháng trước</span>
+              <span className="text-xs text-[#667085] font-medium block">Deal đã chốt</span>
+              <div className="text-2xl sm:text-[26px] font-bold text-[#101828]">{wonDealsCount}</div>
+              <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#1765FF]">
+                <span>{deals.length} tổng deal</span>
               </div>
             </div>
           </div>
@@ -170,41 +282,40 @@ export default function ReportsPage() {
             </div>
             <div>
               <span className="text-xs text-[#667085] font-medium block">Tỷ lệ thắng</span>
-              <div className="text-2xl sm:text-[26px] font-bold text-[#101828]">28%</div>
-              <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#059669]">
-                <ArrowUp className="w-3 h-3 stroke-[2.5]" />
-                <span>+3,4%</span>
-                <span className="text-[10px] text-[#98A2B3] font-normal">so với tháng trước</span>
+              <div className="text-2xl sm:text-[26px] font-bold text-[#101828]">{winRate}%</div>
+              <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#7C3AED]">
+                <span>{wonDealsCount} / {deals.length || 1} deal</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Chu kỳ bán hàng */}
+        {/* Khách hàng */}
         <div className="bg-white rounded-[12px] border border-[#E6EBF2] p-5 shadow-2xs">
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl bg-[#FFFBEB] text-[#D97706] flex items-center justify-center">
-              <Clock className="w-5 h-5" />
+              <Users className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-xs text-[#667085] font-medium block">Chu kỳ bán hàng</span>
-              <div className="text-2xl sm:text-[26px] font-bold text-[#101828]">18 ngày</div>
-              <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#059669]">
-                <ArrowDown className="w-3 h-3 stroke-[2.5]" />
-                <span>-2 ngày</span>
-                <span className="text-[10px] text-[#98A2B3] font-normal">nhanh hơn</span>
+              <span className="text-xs text-[#667085] font-medium block">Tổng khách hàng</span>
+              <div className="text-2xl sm:text-[26px] font-bold text-[#101828]">{customers.length}</div>
+              <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#D97706]">
+                <span>trong workspace</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Row 1: Doanh thu so với mục tiêu (2 cols) vs Nguồn khách hàng (1 col) - Matching Image 5 */}
+      {/* Row 1: Doanh thu so với mục tiêu & Nguồn khách hàng */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
         {/* Doanh thu so với mục tiêu */}
         <div className="xl:col-span-2 bg-white rounded-[12px] border border-[#E6EBF2] p-5 sm:p-6 shadow-2xs">
           <div className="flex items-center justify-between mb-5">
-            <h3 className="font-bold text-base text-[#101828]">Doanh thu so với mục tiêu</h3>
+            <div>
+              <h3 className="font-bold text-base text-[#101828]">Doanh thu theo tháng (triệu VNĐ)</h3>
+              <p className="text-xs text-[#667085]">Số liệu thực từ các hợp đồng ký kết</p>
+            </div>
             <div className="flex items-center gap-4 text-xs">
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-full bg-[#1765FF]" />
@@ -219,7 +330,7 @@ export default function ReportsPage() {
 
           <div className="w-full h-64 sm:h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={REPORT_REVENUE_VS_TARGET} margin={{ top: 15, right: 10, left: -15, bottom: 0 }}>
+              <BarChart data={revenueVsTargetData} margin={{ top: 15, right: 10, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="0 0" vertical={false} stroke="#F1F4F9" />
                 <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#667085', fontSize: 11 }} />
                 <YAxis
@@ -229,7 +340,7 @@ export default function ReportsPage() {
                   tickFormatter={(val) => `${val} tr`}
                 />
                 <Tooltip
-                  formatter={(val: any) => [`${val} triệu VNĐ`]}
+                  formatter={(val: unknown) => [`${val} triệu VNĐ`]}
                   contentStyle={{ borderRadius: 8, borderColor: '#E6EBF2', fontSize: 12 }}
                 />
                 <Bar dataKey="actual" fill="#1765FF" radius={[4, 4, 0, 0]} name="Thực tế" />
@@ -243,50 +354,60 @@ export default function ReportsPage() {
         <div className="xl:col-span-1 bg-white rounded-[12px] border border-[#E6EBF2] p-5 sm:p-6 shadow-2xs flex flex-col justify-between">
           <h3 className="font-bold text-base text-[#101828] mb-2">Nguồn khách hàng</h3>
 
-          <div className="flex items-center justify-center my-2 relative">
-            <div className="w-44 h-44">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={REPORT_CUSTOMER_SOURCES}
-                    dataKey="count"
-                    nameKey="name"
-                    innerRadius={55}
-                    outerRadius={75}
-                    paddingAngle={3}
-                  >
-                    {REPORT_CUSTOMER_SOURCES.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="absolute flex flex-col items-center justify-center text-center">
-              <span className="text-[10px] text-[#98A2B3] uppercase font-bold">Tổng</span>
-              <span className="text-xl font-bold text-[#101828]">250</span>
-              <span className="text-[10px] text-[#667085]">khách hàng</span>
-            </div>
-          </div>
-
-          <div className="space-y-2 text-xs pt-3 border-t border-[#F2F4F7]">
-            {REPORT_CUSTOMER_SOURCES.map((s) => (
-              <div key={s.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                  <span className="text-[#344054] font-medium">{s.name}</span>
+          {customerSourcesData.length > 0 ? (
+            <>
+              <div className="flex items-center justify-center my-2 relative">
+                <div className="w-44 h-44">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={customerSourcesData}
+                        dataKey="count"
+                        nameKey="name"
+                        innerRadius={55}
+                        outerRadius={75}
+                        paddingAngle={3}
+                      >
+                        {customerSourcesData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-                <span className="font-semibold text-[#101828]">
-                  {s.count} ({s.percent}%)
-                </span>
+                <div className="absolute flex flex-col items-center justify-center text-center">
+                  <span className="text-[10px] text-[#98A2B3] uppercase font-bold">Tổng</span>
+                  <span className="text-xl font-bold text-[#101828]">{customers.length}</span>
+                  <span className="text-[10px] text-[#667085]">khách hàng</span>
+                </div>
               </div>
-            ))}
-          </div>
+
+              <div className="space-y-2 text-xs pt-3 border-t border-[#F2F4F7] max-h-36 overflow-y-auto">
+                {customerSourcesData.map((s) => (
+                  <div key={s.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                      <span className="text-[#344054] font-medium">{s.name}</span>
+                    </div>
+                    <span className="font-semibold text-[#101828]">
+                      {s.count} ({s.percent}%)
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center py-10 text-center">
+              <Inbox className="w-8 h-8 text-[#98A2B3] mb-2" />
+              <p className="text-xs text-[#667085]">Chưa có khách hàng</p>
+              <p className="text-[11px] text-[#98A2B3]">Thêm khách hàng để xem phân bố nguồn</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Row 2: Hiệu suất đội ngũ (2 cols) vs Tỷ lệ chuyển đổi (1 col) - Matching Image 5 */}
+      {/* Row 2: Hiệu suất đội ngũ & Tỷ lệ chuyển đổi */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Hiệu suất đội ngũ */}
         <div className="xl:col-span-2 bg-white rounded-[12px] border border-[#E6EBF2] p-5 sm:p-6 shadow-2xs">
@@ -299,11 +420,11 @@ export default function ReportsPage() {
                   <th className="py-2.5 px-3">Số cơ hội</th>
                   <th className="py-2.5 px-3">Đã chốt</th>
                   <th className="py-2.5 px-3">Doanh thu</th>
-                  <th className="py-2.5 px-3">Hoàn thành mục tiêu</th>
+                  <th className="py-2.5 px-3">Chỉ tiêu (100tr)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F2F4F7]">
-                {REPORT_TEAM_PERFORMANCE.map((t) => (
+                {teamPerformanceData.map((t) => (
                   <tr key={t.member.id} className="hover:bg-[#F8FAFC]">
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
@@ -314,7 +435,7 @@ export default function ReportsPage() {
                     <td className="py-3 px-3 font-medium text-[#344054]">{t.dealsCount}</td>
                     <td className="py-3 px-3 font-semibold text-[#101828]">{t.wonCount}</td>
                     <td className="py-3 px-3 font-bold text-[#101828]">
-                      {t.revenue.toLocaleString('vi-VN')} đ
+                      {formatCurrency(t.revenue)}
                     </td>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2 w-32">
@@ -339,11 +460,10 @@ export default function ReportsPage() {
 
         {/* Funnel Tỷ lệ chuyển đổi */}
         <div className="xl:col-span-1 bg-white rounded-[12px] border border-[#E6EBF2] p-5 sm:p-6 shadow-2xs flex flex-col justify-between">
-          <h3 className="font-bold text-base text-[#101828] mb-3">Tỷ lệ chuyển đổi</h3>
+          <h3 className="font-bold text-base text-[#101828] mb-3">Tỷ lệ chuyển đổi (Funnel)</h3>
 
-          {/* Funnel Trapezoids / Bars */}
           <div className="space-y-2.5 my-2">
-            {REPORT_CONVERSION_FUNNEL.map((step) => (
+            {conversionFunnelData.map((step) => (
               <div key={step.stage} className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-medium text-[#344054]">{step.stage}</span>
@@ -355,7 +475,7 @@ export default function ReportsPage() {
                   <div
                     className="h-full rounded-lg transition-all duration-500"
                     style={{
-                      width: `${step.percent}%`,
+                      width: `${Math.max(4, step.percent)}%`,
                       backgroundColor: step.color,
                     }}
                   />
@@ -365,7 +485,7 @@ export default function ReportsPage() {
           </div>
 
           <div className="p-3 bg-[#EFF6FF] rounded-xl text-[11px] text-[#1765FF] mt-2">
-            💡 Tỷ lệ chuyển đổi từ Tiềm năng sang Thành công đạt 10%, vượt 2% so với định mức toàn ngành.
+            💡 Tỷ lệ chuyển đổi được tính toán tự động dựa trên các cơ hội kinh doanh thực tế trong workspace.
           </div>
         </div>
       </div>

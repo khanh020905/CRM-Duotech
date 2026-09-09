@@ -1,12 +1,45 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import Link from 'next/link';
 import { Filter, ArrowRight } from 'lucide-react';
-import { PIPELINE_STAGES } from '@/data/mockData';
+import { useCRM } from '@/context/CRMContext';
 import { formatCurrency } from '@/lib/utils';
+import { DealStage } from '@/types/crm';
+
+const PIPELINE_ORDER: { id: string; name: DealStage }[] = [
+  { id: 'stage-1', name: 'Mới' },
+  { id: 'stage-2', name: 'Đã liên hệ' },
+  { id: 'stage-3', name: 'Đề xuất' },
+  { id: 'stage-4', name: 'Đàm phán' },
+  { id: 'stage-5', name: 'Thắng' },
+];
 
 export function SalesPipeline() {
+  const { deals } = useCRM();
+
+  const { stages, totalPipelineValue } = useMemo(() => {
+    // Total value of non-lost deals in pipeline
+    const activeDeals = deals.filter((d) => d.stage !== 'Thua');
+    const totalVal = activeDeals.reduce((sum, d) => sum + (d.value || 0), 0);
+
+    const calculatedStages = PIPELINE_ORDER.map((item) => {
+      const stageDeals = deals.filter((d) => d.stage === item.name);
+      const stageVal = stageDeals.reduce((sum, d) => sum + (d.value || 0), 0);
+      const percent = totalVal > 0 ? Math.min(100, Math.round((stageVal / totalVal) * 100)) : 0;
+
+      return {
+        id: item.id,
+        name: item.name,
+        count: stageDeals.length,
+        totalValue: stageVal,
+        percent,
+      };
+    });
+
+    return { stages: calculatedStages, totalPipelineValue: totalVal };
+  }, [deals]);
+
   return (
     <div className="bg-white rounded-[12px] border border-[#E6EBF2] p-5 sm:p-6 shadow-2xs flex flex-col justify-between h-full">
       {/* Header */}
@@ -30,7 +63,7 @@ export function SalesPipeline() {
 
       {/* Stages List */}
       <div className="space-y-5 flex-1 flex flex-col justify-around">
-        {PIPELINE_STAGES.map((stage) => {
+        {stages.map((stage) => {
           return (
             <div key={stage.id} className="flex items-center gap-3 text-xs sm:text-sm">
               {/* Stage Name */}
@@ -64,7 +97,7 @@ export function SalesPipeline() {
       <div className="mt-6 pt-4 border-t border-[#F2F4F7] flex items-center justify-between text-xs text-[#667085]">
         <span>Tổng giá trị pipeline</span>
         <span className="font-semibold text-[#101828] text-sm">
-          {formatCurrency(1_410_000_000, true)}
+          {formatCurrency(totalPipelineValue, true)}
         </span>
       </div>
     </div>
