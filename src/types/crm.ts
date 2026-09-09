@@ -35,8 +35,28 @@ export interface Member {
   joinedDate?: string; // DD/MM/YYYY
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  slug?: string;
+  description?: string;
+  ownerId?: string;
+  logoUrl?: string;
+  contactEmail?: string;
+  phone?: string;
+  address?: string;
+  taxCode?: string;
+  website?: string;
+  timezone?: string;
+  currency?: string;
+  dateFormat?: string;
+  isDefault?: boolean;
+  createdAt?: string;
+}
+
 export interface Customer {
   id: string;
+  workspaceId?: string;
   name: string;
   company: string;
   website?: string;
@@ -56,6 +76,7 @@ export type DealStage = 'Mới' | 'Đã liên hệ' | 'Đề xuất' | 'Đàm ph
 
 export interface Deal {
   id: string;
+  workspaceId?: string;
   title: string;
   customerId: string;
   value: number; // in VND
@@ -105,6 +126,7 @@ export interface ContractAttachment {
 
 export interface Contract {
   id: string;
+  workspaceId?: string;
   contractCode: string; // e.g. "HD-2026-001"
   customerId: string;
   customerName?: string; // Optional cached name or company
@@ -135,6 +157,7 @@ export type TaskPriority = 'Cao' | 'Trung bình' | 'Thấp';
 
 export interface Task {
   id: string;
+  workspaceId?: string;
   title: string;
   description?: string;
   customerId?: string;
@@ -154,6 +177,7 @@ export type CalendarEventType = 'Demo' | 'Tư vấn' | 'Nội bộ';
 
 export interface CalendarEvent {
   id: string;
+  workspaceId?: string;
   title: string;
   type: CalendarEventType;
   customerId?: string;

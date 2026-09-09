@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { UserSettings, WorkspaceSettings as WorkspaceSettingsType } from '@/types/crm';
+import { UserSettings } from '@/types/crm';
 import { Button } from '@/components/ui/Button';
-import { Building2, Upload, Trash2, Globe, Shield, AlertCircle } from 'lucide-react';
+import { Building2, Plus, Trash2, Globe, Check, Layers } from 'lucide-react';
+import { useCRM } from '@/context/CRMContext';
+import { CreateWorkspaceModal } from '@/components/layout/CreateWorkspaceModal';
 
 interface WorkspaceSettingsProps {
   settings: UserSettings;
@@ -16,8 +18,18 @@ export function WorkspaceSettings({
   onSave,
   onDirtyChange,
 }: WorkspaceSettingsProps) {
+  const {
+    workspaces,
+    activeWorkspaceId,
+    switchWorkspace,
+    deleteWorkspace,
+    updateWorkspace,
+  } = useCRM();
+
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
   const ws = settings.workspaceInfo || {
-    name: 'Công ty TNHH Demo',
+    name: 'Duotech Solution',
     logoUrl: '',
     contactEmail: 'contact@duotech.vn',
     phone: '028 3822 9999',
@@ -41,6 +53,20 @@ export function WorkspaceSettings({
   const [dateFormat, setDateFormat] = useState(ws.dateFormat || 'dd/MM/yyyy');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state if settings prop updates
+  useEffect(() => {
+    setName(ws.name);
+    setLogoUrl(ws.logoUrl || '');
+    setContactEmail(ws.contactEmail || '');
+    setPhone(ws.phone || '');
+    setAddress(ws.address || '');
+    setTaxCode(ws.taxCode || '');
+    setWebsite(ws.website || '');
+    setTimezone(ws.timezone || 'Asia/Ho_Chi_Minh');
+    setCurrency(ws.currency || 'VNĐ');
+    setDateFormat(ws.dateFormat || 'dd/MM/yyyy');
+  }, [ws.name, ws.logoUrl, ws.contactEmail, ws.phone, ws.address, ws.taxCode, ws.website, ws.timezone, ws.currency, ws.dateFormat]);
 
   const isDirty =
     name !== ws.name ||
@@ -81,29 +107,134 @@ export function WorkspaceSettings({
     setDateFormat(ws.dateFormat || 'dd/MM/yyyy');
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
-      workspaceInfo: {
-        name: name.trim(),
-        logoUrl,
-        contactEmail: contactEmail.trim(),
-        phone: phone.trim(),
-        address: address.trim(),
-        taxCode: taxCode.trim(),
-        website: website.trim(),
-        timezone,
-        currency,
-        dateFormat,
-      },
-    });
+    const updatedWsInfo = {
+      name: name.trim(),
+      logoUrl,
+      contactEmail: contactEmail.trim(),
+      phone: phone.trim(),
+      address: address.trim(),
+      taxCode: taxCode.trim(),
+      website: website.trim(),
+      timezone,
+      currency,
+      dateFormat,
+    };
+
+    onSave({ workspaceInfo: updatedWsInfo });
+
+    // Also sync active workspace model in MongoDB
+    if (activeWorkspaceId) {
+      await updateWorkspace(activeWorkspaceId, updatedWsInfo);
+    }
+  };
+
+  const handleDeleteWs = async (wsId: string, wsName: string) => {
+    if (confirm(`Bạn có chắc chắn muốn xóa không gian làm việc "${wsName}" không?`)) {
+      await deleteWorkspace(wsId);
+    }
   };
 
   return (
     <div className="max-w-4xl space-y-6">
+      {/* Workspaces List Section */}
+      <div className="bg-white rounded-2xl p-6 border border-[#E6EBF2] shadow-2xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] flex items-center justify-center text-[#1765FF]">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-[#101828]">Danh sách Không gian làm việc</h3>
+              <p className="text-xs text-[#667085]">
+                Quản lý các chi nhánh, khối phòng ban hoặc dự án độc lập
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => setIsCreateModalOpen(true)}
+            className="gap-1.5 text-xs h-9 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tạo Workspace</span>
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2">
+          {workspaces.map((w) => {
+            const isActive = w.id === activeWorkspaceId;
+            return (
+              <div
+                key={w.id}
+                className={`p-4 rounded-xl border transition-all flex flex-col justify-between ${
+                  isActive
+                    ? 'border-[#1765FF] bg-[#F8FAFF] shadow-xs'
+                    : 'border-[#E6EBF2] bg-white hover:border-[#CBD5E1]'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-bold text-sm text-[#101828] truncate">{w.name}</span>
+                      {isActive && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#1765FF] text-white">
+                          Đang hoạt động
+                        </span>
+                      )}
+                    </div>
+                    {workspaces.length > 1 && !isActive && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWs(w.id, w.name)}
+                        className="p-1 text-[#98A2B3] hover:text-rose-600 rounded transition-colors"
+                        title="Xóa workspace này"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  {w.description && (
+                    <p className="text-xs text-[#667085] line-clamp-2 mb-2">{w.description}</p>
+                  )}
+                  <div className="text-[11px] text-[#98A2B3] space-y-0.5">
+                    {w.address && <p className="truncate">📍 {w.address}</p>}
+                    {w.contactEmail && <p className="truncate">✉️ {w.contactEmail}</p>}
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-[#E6EBF2]/60 flex items-center justify-between">
+                  <span className="text-[11px] text-[#667085]">
+                    Tiền tệ: <strong className="text-[#101828]">{w.currency || 'VNĐ'}</strong>
+                  </span>
+                  {!isActive ? (
+                    <button
+                      type="button"
+                      onClick={() => switchWorkspace(w.id)}
+                      className="text-xs font-semibold text-[#1765FF] hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <span>Kích hoạt</span>
+                    </button>
+                  ) : (
+                    <span className="text-xs font-medium text-[#059669] flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Đã chọn
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Edit Active Workspace Info */}
       <div className="bg-white rounded-2xl p-6 border border-[#E6EBF2] shadow-2xs space-y-6">
         <div>
-          <h3 className="text-base font-bold text-[#101828]">Không gian làm việc & Công ty</h3>
+          <h3 className="text-base font-bold text-[#101828]">
+            Thông tin chi tiết: <span className="text-[#1765FF]">{ws.name}</span>
+          </h3>
           <p className="text-xs text-[#667085] mt-0.5">
             Thông tin tổ chức được hiển thị trên tiêu đề, hợp đồng và hóa đơn của Duotech CRM.
           </p>
@@ -119,54 +250,49 @@ export function WorkspaceSettings({
                 <Building2 className="w-8 h-8 text-[#98A2B3]" />
               )}
             </div>
-
-            <div className="space-y-1.5">
+            <div>
               <input
-                ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/svg+xml"
+                ref={fileInputRef}
                 onChange={handleLogoUpload}
+                accept="image/*"
                 className="hidden"
               />
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-xs font-semibold border-[#1765FF] text-[#1765FF] hover:bg-[#EFF6FF]"
+                  className="text-xs font-semibold text-[#344054]"
                 >
-                  Tải logo công ty
+                  Tải ảnh lên
                 </Button>
                 {logoUrl && (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={() => setLogoUrl('')}
-                    className="p-1.5 text-[#667085] hover:text-[#DC2626] rounded-lg transition-colors"
-                    title="Xóa logo"
+                    className="text-xs text-[#B42318] hover:bg-rose-50"
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                    Xóa ảnh
+                  </Button>
                 )}
               </div>
-              <p className="text-[11px] text-[#667085]">
-                PNG, SVG, JPG. Khuyên dùng kích thước vuông (200x200px).
-              </p>
+              <p className="text-[11px] text-[#98A2B3] mt-1">PNG, JPG, SVG tối đa 2MB</p>
             </div>
           </div>
 
-          {/* Grid 2 Columns */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
+            <div className="sm:col-span-2">
               <label className="block text-xs font-semibold text-[#344054] mb-1">
-                Tên công ty / Không gian làm việc <span className="text-[#DC2626]">*</span>
+                Tên công ty / Không gian làm việc <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full h-10 px-3.5 bg-white border border-[#D0D5DD] rounded-xl text-xs sm:text-sm text-[#101828] focus:outline-none focus:ring-2 focus:ring-[#1765FF]/20 focus:border-[#1765FF]"
-                required
               />
             </div>
 
@@ -178,14 +304,29 @@ export function WorkspaceSettings({
                 type="text"
                 value={taxCode}
                 onChange={(e) => setTaxCode(e.target.value)}
-                placeholder="Ví dụ: 0316888999"
+                placeholder="VD: 0316888999"
                 className="w-full h-10 px-3.5 bg-white border border-[#D0D5DD] rounded-xl text-xs sm:text-sm text-[#101828] focus:outline-none focus:ring-2 focus:ring-[#1765FF]/20 focus:border-[#1765FF]"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-[#344054] mb-1">
-                Email liên hệ chính thức
+                Tiền tệ chính
+              </label>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-full h-10 px-3 bg-white border border-[#D0D5DD] rounded-xl text-xs sm:text-sm text-[#101828] focus:outline-none focus:ring-2 focus:ring-[#1765FF]/20 focus:border-[#1765FF]"
+              >
+                <option value="VNĐ">VNĐ (Việt Nam Đồng)</option>
+                <option value="USD">USD (Đô la Mỹ)</option>
+                <option value="EUR">EUR (Euro)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#344054] mb-1">
+                Email liên hệ công ty
               </label>
               <input
                 type="email"
@@ -269,6 +410,12 @@ export function WorkspaceSettings({
           </div>
         </form>
       </div>
+
+      {/* Create Workspace Modal */}
+      <CreateWorkspaceModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+      />
     </div>
   );
 }
