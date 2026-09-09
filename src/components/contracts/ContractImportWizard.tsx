@@ -40,6 +40,8 @@ interface ParsedRow {
   raw: any;
   errors: string[];
   isDuplicate: boolean;
+  duplicateAction: 'skip' | 'extend' | 'create_new';
+  matchedContractId?: string;
 }
 
 export function ContractImportWizard({
@@ -47,7 +49,7 @@ export function ContractImportWizard({
   onClose,
   onImportSuccess,
 }: ContractImportWizardProps) {
-  const { contracts, customers, members, importContracts, addCustomer, showToast } = useCRM();
+  const { contracts, customers, members, importContracts, updateContract, addCustomer, showToast } = useCRM();
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [file, setFile] = useState<File | null>(null);
@@ -71,7 +73,7 @@ export function ContractImportWizard({
   });
 
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
-  const [importResults, setImportResults] = useState<{ success: number; skipped: number } | null>(null);
+  const [importResults, setImportResults] = useState<{ success: number; skipped: number; extended: number } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
 
@@ -225,13 +227,14 @@ export function ContractImportWizard({
       const rawMaintainFee = maintainFeeColIdx !== -1 ? parseNumericValue(row[maintainFeeColIdx]) : 0;
 
       // Duplicate Check: Khách hàng + SĐT + Dự án
-      const isDuplicate = contracts.some(
+      const matchedContract = contracts.find(
         (c) =>
           (c.customerName?.toLowerCase() === rawCustomerName.toLowerCase() ||
             customers.find((cust) => cust.id === c.customerId)?.company.toLowerCase() === rawCustomerName.toLowerCase()) &&
           c.project.toLowerCase() === rawProject.toLowerCase() &&
           (rawPhone ? c.phone === rawPhone : true)
       );
+      const isDuplicate = !!matchedContract;
 
       return {
         rowIndex: idx + 2,
@@ -247,6 +250,8 @@ export function ContractImportWizard({
         raw: row,
         errors,
         isDuplicate,
+        duplicateAction: isDuplicate ? 'extend' : 'skip',
+        matchedContractId: matchedContract?.id,
       };
     });
 
@@ -256,13 +261,52 @@ export function ContractImportWizard({
 
   // 3. Confirm and Execute Import
   const handleExecuteImport = () => {
-    // Only import valid and non-duplicate rows (or user-accepted rows)
-    const validRows = parsedRows.filter((r) => r.errors.length === 0 && !r.isDuplicate);
+    // Rows that will be imported as NEW contracts
+    const newRows = parsedRows.filter(
+      (r) => r.errors.length === 0 && (!r.isDuplicate || r.duplicateAction === 'create_new')
+    );
+    // Rows that will EXTEND existing contracts
+    const extendRows = parsedRows.filter(
+      (r) => r.errors.length === 0 && r.isDuplicate && r.duplicateAction === 'extend' && r.matchedContractId
+    );
 
-    if (validRows.length === 0) {
-      showToast('Không có dòng hợp lệ', 'Tất cả các dòng đều chứa lỗi hoặc bị trùng', 'error');
+    if (newRows.length === 0 && extendRows.length === 0) {
+      showToast('Không có dòng hợp lệ', 'Tất cả các dòng đều chứa lỗi hoặc bị bỏ qua', 'error');
       return;
     }
+
+    // Process extend rows: update existing contracts' maintenance
+    extendRows.forEach((r) => {
+      const hasMaintain = r.maintainFee > 0 || (r.maintainInfo && !r.maintainInfo.includes('Chưa đăng ký') && !r.maintainInfo.includes('Không'));
+      const now = new Date();
+      const timestamp =
+        now.toLocaleDateString('vi-VN') +
+        ' ' +
+        now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
+      updateContract(r.matchedContractId!, {
+        status: hasMaintain ? 'Đang bảo trì' : undefined,
+        maintenance: {
+          status: hasMaintain ? 'Đang hoạt động' : 'Chưa đăng ký',
+          description: r.maintainInfo || 'Hosting & Hỗ trợ',
+          startDate: now.toISOString().split('T')[0],
+          nextRenewalDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          monthlyFee: r.maintainFee,
+        },
+        history: [
+          ...(contracts.find((c) => c.id === r.matchedContractId)?.history || []),
+          {
+            id: `h-${Date.now()}-${r.rowIndex}`,
+            timestamp,
+            authorName: 'Hệ thống Import',
+            action: 'Gia hạn Maintain từ Import Excel',
+            details: `Cập nhật từ file: ${file?.name || 'Tài liệu'}. Dịch vụ: ${r.maintainInfo || '—'}. Phí: ${r.maintainFee.toLocaleString('vi-VN')} đ/tháng.`,
+          },
+        ],
+      });
+    });
+
+    const validRows = newRows;
 
     const contractsToInsert: Omit<Contract, 'id' | 'createdAt'>[] = validRows.map((r) => {
       // Find matching customer or generate ID
@@ -327,9 +371,9 @@ export function ContractImportWizard({
       };
     });
 
-    const insertedCount = importContracts(contractsToInsert);
-    const skippedCount = parsedRows.length - insertedCount;
-    setImportResults({ success: insertedCount, skipped: skippedCount });
+    const insertedCount = validRows.length > 0 ? importContracts(contractsToInsert) : 0;
+    const skippedCount = parsedRows.length - insertedCount - extendRows.length;
+    setImportResults({ success: insertedCount, skipped: skippedCount, extended: extendRows.length });
     setStep(4);
     if (onImportSuccess) onImportSuccess();
   };
@@ -356,9 +400,12 @@ export function ContractImportWizard({
 
   if (!isOpen) return null;
 
-  const validCount = parsedRows.filter((r) => r.errors.length === 0 && !r.isDuplicate).length;
+  const newImportCount = parsedRows.filter((r) => r.errors.length === 0 && (!r.isDuplicate || r.duplicateAction === 'create_new')).length;
+  const extendCount = parsedRows.filter((r) => r.errors.length === 0 && r.isDuplicate && r.duplicateAction === 'extend').length;
+  const validCount = newImportCount + extendCount;
   const errorCount = parsedRows.filter((r) => r.errors.length > 0).length;
   const duplicateCount = parsedRows.filter((r) => r.isDuplicate).length;
+  const skipCount = parsedRows.filter((r) => r.isDuplicate && r.duplicateAction === 'skip').length;
 
   return (
     <Modal
@@ -594,20 +641,29 @@ export function ContractImportWizard({
 
             {/* Error / Warning Alert */}
             {(errorCount > 0 || duplicateCount > 0) && (
-              <div className="p-3 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl flex items-center justify-between text-xs text-[#92400E]">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-[#D97706]" />
-                  <span>
-                    Phát hiện <strong>{errorCount}</strong> dòng lỗi và <strong>{duplicateCount}</strong> dòng nghi trùng lặp. Các dòng này sẽ được bỏ qua khi nhập.
-                  </span>
+              <div className="p-3 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl space-y-1.5 text-xs text-[#92400E]">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-[#D97706]" />
+                    <span>
+                      Phát hiện <strong>{errorCount}</strong> dòng lỗi và <strong>{duplicateCount}</strong> dòng trùng lặp.
+                    </span>
+                  </div>
+                  {errorCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadErrors}
+                      className="font-bold underline hover:text-[#78350F] shrink-0"
+                    >
+                      Tải danh sách lỗi
+                    </button>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleDownloadErrors}
-                  className="font-bold underline hover:text-[#78350F] shrink-0"
-                >
-                  Tải danh sách lỗi
-                </button>
+                {duplicateCount > 0 && (
+                  <p className="text-[#1E40AF] bg-[#EFF6FF] border border-[#B2CCFF] rounded-lg p-2 mt-1">
+                    💡 Dòng trùng lặp có thể chọn <strong>&quot;Gia hạn&quot;</strong> để cập nhật Maintain vào hợp đồng có sẵn, hoặc <strong>&quot;Tạo mới&quot;</strong> để nhập thành hợp đồng riêng.
+                  </p>
+                )}
               </div>
             )}
 
@@ -622,14 +678,24 @@ export function ContractImportWizard({
                     <th className="p-2">SĐT</th>
                     <th className="p-2">Dự án</th>
                     <th className="p-2 text-right">Giá trị</th>
-                    <th className="p-2">Lỗi phát hiện</th>
+                    <th className="p-2">Hành động / Lỗi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F2F4F7]">
-                  {parsedRows.map((r) => (
+                  {parsedRows.map((r, idx) => (
                     <tr
                       key={r.rowIndex}
-                      className={r.errors.length > 0 ? 'bg-[#FEF2F2]/40' : r.isDuplicate ? 'bg-[#FFFBEB]/40' : ''}
+                      className={
+                        r.errors.length > 0
+                          ? 'bg-[#FEF2F2]/40'
+                          : r.isDuplicate && r.duplicateAction === 'skip'
+                          ? 'bg-[#F2F4F7]/40'
+                          : r.isDuplicate && r.duplicateAction === 'extend'
+                          ? 'bg-[#EFF6FF]/40'
+                          : r.isDuplicate && r.duplicateAction === 'create_new'
+                          ? 'bg-[#FFFBEB]/40'
+                          : ''
+                      }
                     >
                       <td className="p-2 text-center font-mono text-[#667085]">{r.rowIndex}</td>
                       <td className="p-2 whitespace-nowrap">
@@ -638,9 +704,19 @@ export function ContractImportWizard({
                             <XCircle className="w-3.5 h-3.5" /> Lỗi
                           </span>
                         ) : r.isDuplicate ? (
-                          <span className="text-[#D97706] font-semibold flex items-center gap-1">
-                            <AlertTriangle className="w-3.5 h-3.5" /> Nghi trùng
-                          </span>
+                          r.duplicateAction === 'extend' ? (
+                            <span className="text-[#1765FF] font-semibold flex items-center gap-1">
+                              <RefreshCw className="w-3.5 h-3.5" /> Gia hạn
+                            </span>
+                          ) : r.duplicateAction === 'create_new' ? (
+                            <span className="text-[#D97706] font-semibold flex items-center gap-1">
+                              <Layers className="w-3.5 h-3.5" /> Tạo mới
+                            </span>
+                          ) : (
+                            <span className="text-[#98A2B3] font-semibold flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5" /> Bỏ qua
+                            </span>
+                          )
                         ) : (
                           <span className="text-[#059669] font-semibold flex items-center gap-1">
                             <CheckCircle2 className="w-3.5 h-3.5" /> Hợp lệ
@@ -653,9 +729,29 @@ export function ContractImportWizard({
                       <td className="p-2 text-right font-medium whitespace-nowrap">
                         {r.value.toLocaleString('vi-VN')} đ
                       </td>
-                      <td className="p-2 text-[#DC2626]">
-                        {r.errors.join(', ')}
-                        {r.isDuplicate && (r.errors.length > 0 ? ' • ' : '') + 'Đã trùng khách hàng + dự án'}
+                      <td className="p-2">
+                        {r.errors.length > 0 ? (
+                          <span className="text-[#DC2626] text-[11px]">{r.errors.join(', ')}</span>
+                        ) : r.isDuplicate ? (
+                          <select
+                            value={r.duplicateAction}
+                            onChange={(e) => {
+                              const newAction = e.target.value as 'skip' | 'extend' | 'create_new';
+                              setParsedRows((prev) =>
+                                prev.map((pr, prIdx) =>
+                                  prIdx === idx ? { ...pr, duplicateAction: newAction } : pr
+                                )
+                              );
+                            }}
+                            className="h-7 px-2 bg-white border border-[#D0D5DD] rounded-lg text-[11px] text-[#101828] focus:outline-none focus:ring-1 focus:ring-[#1765FF]/30 cursor-pointer"
+                          >
+                            <option value="extend">🔄 Gia hạn vào HĐ có sẵn</option>
+                            <option value="create_new">➕ Tạo HĐ mới riêng</option>
+                            <option value="skip">⏭ Bỏ qua</option>
+                          </select>
+                        ) : (
+                          <span className="text-[11px] text-[#059669]">Sẵn sàng nhập</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -673,7 +769,11 @@ export function ContractImportWizard({
                 disabled={validCount === 0}
                 onClick={handleExecuteImport}
               >
-                Nhập {validCount} hợp đồng hợp lệ
+                {extendCount > 0 && newImportCount > 0
+                  ? `Nhập ${newImportCount} mới + Gia hạn ${extendCount}`
+                  : extendCount > 0
+                  ? `Gia hạn ${extendCount} hợp đồng`
+                  : `Nhập ${newImportCount} hợp đồng hợp lệ`}
                 <ArrowRight className="w-3.5 h-3.5 ml-1" />
               </Button>
             </div>
@@ -688,10 +788,17 @@ export function ContractImportWizard({
             </div>
             <div>
               <h3 className="text-base font-bold text-[#101828]">Hoàn tất nhập dữ liệu!</h3>
-              <p className="text-xs text-[#667085] mt-1">
-                Đã thêm thành công <strong>{importResults.success}</strong> hợp đồng vào hệ thống.
-                {importResults.skipped > 0 && ` Đã bỏ qua ${importResults.skipped} dòng lỗi / nghi trùng.`}
-              </p>
+              <div className="text-xs text-[#667085] mt-1 space-y-0.5">
+                {importResults.success > 0 && (
+                  <p>Đã thêm thành công <strong>{importResults.success}</strong> hợp đồng mới vào hệ thống.</p>
+                )}
+                {importResults.extended > 0 && (
+                  <p className="text-[#1765FF]">🔄 Đã gia hạn Maintain cho <strong>{importResults.extended}</strong> hợp đồng có sẵn.</p>
+                )}
+                {importResults.skipped > 0 && (
+                  <p>Đã bỏ qua {importResults.skipped} dòng lỗi / bỏ qua.</p>
+                )}
+              </div>
             </div>
 
             <div className="pt-4 flex justify-center gap-3">
